@@ -9,6 +9,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "agent": "tsx src/agent/cli.ts",
     "setup": "node scripts/setup.mjs",
     "demo": "next build && next start -p 3000",
     "tunnel": "node scripts/tunnel.mjs",
