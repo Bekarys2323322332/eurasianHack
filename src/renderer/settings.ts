@@ -6,9 +6,22 @@
  * All sizes are in output pixels (1920x1080 or 1080x1920) unless a comment
  * says otherwise.
  */
-export const settings = {
-  /** Frames per second of the finished video. */
-  fps: 30,
+/** Frames per second of the finished video. The same for every style. */
+export const FPS = 30;
+
+/** The three looks a video can have. */
+export type Style = "trailer" | "tutorial" | "social";
+
+/**
+ * Shared starting point. Each style below changes only the values it needs
+ * to, so most tuning that should apply to every style happens here.
+ */
+const base = {
+  /**
+   * Longest the whole video may be, in seconds, or null for no limit.
+   * When a video would run over, steps are dropped from the end.
+   */
+  maxSeconds: null as number | null,
 
   /** Output size in pixels for each shape of video. */
   sizes: {
@@ -54,6 +67,8 @@ export const settings = {
     /** Title card at the start and the card with the address at the end. */
     titleCardSeconds: 2.0,
     endCardSeconds: 2.5,
+    /** How-to videos end with a written list of the steps instead. */
+    recapCardSeconds: 5.0,
     /** Fade in and out used by the cards, captions and the window. */
     softFadeSeconds: 0.35,
   },
@@ -129,6 +144,29 @@ export const settings = {
     "9:16": { titleSize: 110, subtitleSize: 50 },
   },
 
+  /** How-to videos: the "1 of 6" badge shown on every step. */
+  badge: {
+    "16:9": { fontSize: 34, left: 40, top: 40 },
+    "9:16": { fontSize: 52, left: 40, top: 300 },
+  },
+
+  /** How-to videos: the written list of steps on the end card. */
+  recap: {
+    "16:9": { headingSize: 64, lineSize: 44 },
+    "9:16": { headingSize: 68, lineSize: 48 },
+  },
+
+  /**
+   * The only fixed words the renderer puts on screen. They are English;
+   * change them here if videos in other languages need them.
+   */
+  words: {
+    /** Title of a how-to video: "How to" followed by the goal. */
+    howTo: "How to",
+    /** Step badge: "1 of 6". */
+    of: "of",
+  },
+
   music: {
     /** File name inside the app's public folder. */
     file: "music.mp3",
@@ -144,3 +182,76 @@ export const settings = {
 
   fontFamily: "'Segoe UI', Inter, Roboto, Helvetica, Arial, sans-serif",
 };
+
+export type Settings = typeof base;
+
+/** Multiply every time in the base by one number: below 1 is faster. */
+const paced = (factor: number) =>
+  Object.fromEntries(
+    Object.entries(base.timing).map(([name, seconds]) => [name, seconds * factor]),
+  ) as Settings["timing"];
+
+/**
+ * The three styles. Each one is the base with a few values replaced.
+ *
+ * trailer:  faster pacing, stronger zooms. The default for demo videos.
+ * tutorial: slower, gentle zooms, a longer pause after each step. The
+ *           default for how-to videos.
+ * social:   quick cuts, large captions, never longer than 30 seconds.
+ */
+const presets: Record<Style, Settings> = {
+  trailer: {
+    ...base,
+    timing: paced(0.8),
+    layout: {
+      "16:9": { ...base.layout["16:9"], zoom: 1.9 },
+      "9:16": { ...base.layout["9:16"], zoom: 2.6 },
+    },
+  },
+
+  tutorial: {
+    ...base,
+    timing: {
+      ...paced(1.15),
+      // The action itself finishes after about 2.5 seconds, so these two
+      // leave a clear pause before the next step starts.
+      sceneSecondsWithoutAudio: 3.6,
+      paddingAfterAudio: 1.2,
+    },
+    layout: {
+      "16:9": { ...base.layout["16:9"], zoom: 1.3 },
+      "9:16": { ...base.layout["9:16"], zoom: 1.7 },
+    },
+  },
+
+  social: {
+    ...base,
+    maxSeconds: 30,
+    timing: {
+      ...paced(0.7),
+      // Quick cuts: short cards and almost no fading between things.
+      titleCardSeconds: 1.0,
+      endCardSeconds: 1.5,
+      recapCardSeconds: 3.0,
+      softFadeSeconds: 0.12,
+    },
+    caption: {
+      "16:9": { fontSize: 60, bottom: 44 },
+      "9:16": { fontSize: 84, bottom: 300 },
+    },
+    typingChip: {
+      "16:9": { fontSize: 46, bottom: 190 },
+      "9:16": { fontSize: 64, bottom: 580 },
+    },
+  },
+};
+
+/** The style used when the caller does not pick one. */
+export function defaultStyle(mode: "demo" | "howto"): Style {
+  return mode === "howto" ? "tutorial" : "trailer";
+}
+
+/** All settings for one style. */
+export function settingsFor(style: Style): Settings {
+  return presets[style];
+}

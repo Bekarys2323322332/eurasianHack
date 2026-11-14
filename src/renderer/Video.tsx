@@ -16,7 +16,7 @@
  *     click ripple, cursor
  *   typing chip and caption (never zoom, so they stay readable)
  */
-import React, { useMemo } from "react";
+import React, { createContext, useContext, useMemo } from "react";
 import {
   AbsoluteFill,
   Audio,
@@ -28,15 +28,24 @@ import {
   useCurrentFrame,
 } from "remotion";
 import type { StepFile } from "../shared/stepFile";
-import { settings } from "./settings";
+import { settingsFor, type Settings } from "./settings";
 import {
   buildTimeline,
   musicVolume,
+  recapLine,
   toFrames,
   type Aspect,
   type Scene,
   type VideoProps,
 } from "./timeline";
+
+/**
+ * The settings of the chosen style. JobVideo provides them once and every
+ * component below reads them with useSettings(), so no component needs to
+ * know which style is active.
+ */
+const SettingsContext = createContext<Settings>(settingsFor("trailer"));
+const useSettings = () => useContext(SettingsContext);
 
 /** Stop values from running past the ends of an animation. */
 const CLAMP = { extrapolateLeft: "clamp", extrapolateRight: "clamp" } as const;
@@ -56,7 +65,7 @@ interface Layout {
   toFrame: (x: number, y: number) => { x: number; y: number };
 }
 
-function makeLayout(stepFile: StepFile, aspect: Aspect): Layout {
+function makeLayout(stepFile: StepFile, aspect: Aspect, settings: Settings): Layout {
   const frame = settings.sizes[aspect];
   const { windowWidth, windowCenterY } = settings.layout[aspect];
   const { barHeight } = settings.window;
@@ -75,11 +84,19 @@ function makeLayout(stepFile: StepFile, aspect: Aspect): Layout {
 }
 
 /** The whole video: title card, one scene per visible step, end card. */
-export const JobVideo: React.FC<VideoProps> = ({ stepFile, aspect, music }) => {
+export const JobVideo: React.FC<VideoProps> = ({ stepFile, aspect, style, music }) => {
   const frame = useCurrentFrame();
-  const timeline = useMemo(() => buildTimeline(stepFile), [stepFile]);
-  const layout = useMemo(() => makeLayout(stepFile, aspect), [stepFile, aspect]);
-  const { titleFrames, scenes, endFrom, endFrames } = timeline;
+  const settings = settingsFor(style);
+  const timeline = useMemo(() => buildTimeline(stepFile, settings), [stepFile, settings]);
+  const layout = useMemo(
+    () => makeLayout(stepFile, aspect, settings),
+    [stepFile, aspect, settings],
+  );
+  const { howto, titleFrames, scenes, endFrom, endFrames } = timeline;
+  // "How to create a project": the goal with its first letter in lower case.
+  const howToTitle = stepFile.goal
+    ? `${settings.words.howTo} ${stepFile.goal[0].toLowerCase()}${stepFile.goal.slice(1)}`
+    : stepFile.title;
   const fade = toFrames(settings.timing.softFadeSeconds);
   const address = prettyUrl(stepFile.url);
 
@@ -96,26 +113,39 @@ export const JobVideo: React.FC<VideoProps> = ({ stepFile, aspect, music }) => {
       : 0;
 
   return (
-    <AbsoluteFill
-      style={{ background: settings.colors.backgroundGradient, fontFamily: settings.fontFamily }}
-    >
+    <SettingsContext.Provider value={settings}>
+      <AbsoluteFill
+        style={{ background: settings.colors.backgroundGradient, fontFamily: settings.fontFamily }}
+      >
       {music ? (
         <Audio
           src={staticFile(settings.music.file)}
           loop
           // Called for every frame: quieter while narration plays.
-          volume={(musicFrame) => musicVolume(musicFrame, timeline)}
+          volume={(musicFrame) => musicVolume(musicFrame, timeline, settings)}
         />
       ) : null}
 
       <Sequence durationInFrames={titleFrames}>
-        <Card
-          // Only the name: the goal is written for the agent, not for viewers.
-          title={stepFile.title || address}
-          subtitle=""
-          frames={titleFrames}
-          aspect={aspect}
-        />
+        {howto ? (
+          // How-to videos open with what the viewer will learn.
+          <Card
+            title={howToTitle}
+            subtitle={stepFile.title}
+            smallTitle
+            frames={titleFrames}
+            aspect={aspect}
+          />
+        ) : (
+          <Card
+            // Only the name: in demo mode the goal is written for the agent,
+            // not for viewers.
+            title={stepFile.title || address}
+            subtitle=""
+            frames={titleFrames}
+            aspect={aspect}
+          />
+        )}
       </Sequence>
 
       <AbsoluteFill style={{ opacity: stepsOpacity }}>
@@ -124,20 +154,32 @@ export const JobVideo: React.FC<VideoProps> = ({ stepFile, aspect, music }) => {
           // scene can think in "frames since my own start".
           <Sequence key={scene.step.id} from={scene.from} durationInFrames={scene.frames}>
             <SceneView scene={scene} layout={layout} aspect={aspect} address={address} />
+            {howto ? <Badge number={scene.number} total={scenes.length} aspect={aspect} /> : null}
           </Sequence>
         ))}
       </AbsoluteFill>
 
       <Sequence from={endFrom} durationInFrames={endFrames}>
-        <Card
-          title={stepFile.title}
-          subtitle={address}
-          strongSubtitle
-          frames={endFrames}
-          aspect={aspect}
-        />
+        {howto ? (
+          <RecapCard
+            heading={howToTitle}
+            lines={scenes.map((scene) => recapLine(scene.step))}
+            address={address}
+            frames={endFrames}
+            aspect={aspect}
+          />
+        ) : (
+          <Card
+            title={stepFile.title}
+            subtitle={address}
+            strongSubtitle
+            frames={endFrames}
+            aspect={aspect}
+          />
+        )}
       </Sequence>
-    </AbsoluteFill>
+      </AbsoluteFill>
+    </SettingsContext.Provider>
   );
 };
 
@@ -149,6 +191,7 @@ const SceneView: React.FC<{
   address: string;
 }> = ({ scene, layout, aspect, address }) => {
   const frame = useCurrentFrame();
+  const settings = useSettings();
   const { step, plan } = scene;
   const t = settings.timing;
   const { zoom, zoomPullToCenter } = settings.layout[aspect];
@@ -242,6 +285,7 @@ const BrowserWindow: React.FC<{
   address: string;
   children: React.ReactNode;
 }> = ({ layout, address, children }) => {
+  const settings = useSettings();
   const { cornerRadius, barHeight, shadow } = settings.window;
   const { colors } = settings;
   return (
@@ -315,6 +359,7 @@ const Screenshot: React.FC<{ file: string; shiftPercent: number; opacity: number
 /** A ring that grows and fades at the click spot. */
 const Ripple: React.FC<{ at: number; x: number; y: number }> = ({ at, x, y }) => {
   const frame = useCurrentFrame();
+  const settings = useSettings();
   const length = toFrames(settings.timing.rippleSeconds);
   if (frame < at || frame > at + length) return null;
   const progress = interpolate(frame, [at, at + length], [0, 1], {
@@ -342,6 +387,7 @@ const Ripple: React.FC<{ at: number; x: number; y: number }> = ({ at, x, y }) =>
 /** Our own arrow cursor. The tip of the arrow sits exactly on x, y. */
 const Cursor: React.FC<{ x: number; y: number; clickAt: number | null }> = ({ x, y, clickAt }) => {
   const frame = useCurrentFrame();
+  const settings = useSettings();
   const { size } = settings.cursor;
   // A quick squeeze at the click moment makes the press feel physical.
   const press =
@@ -381,6 +427,7 @@ const TypingChip: React.FC<{
   aspect: Aspect;
 }> = ({ text, typing, aspect }) => {
   const frame = useCurrentFrame();
+  const settings = useSettings();
   const fade = toFrames(settings.timing.softFadeSeconds);
   const { fontSize, bottom } = settings.typingChip[aspect];
   // Appear just before the first letter, leave shortly after the last one.
@@ -429,6 +476,7 @@ const TypingChip: React.FC<{
 /** Subtitle near the bottom of the frame. */
 const Caption: React.FC<{ text: string; aspect: Aspect }> = ({ text, aspect }) => {
   const frame = useCurrentFrame();
+  const settings = useSettings();
   const { fontSize, bottom } = settings.caption[aspect];
   const opacity = interpolate(frame, [0, toFrames(settings.timing.softFadeSeconds)], [0, 1], CLAMP);
   return (
@@ -478,12 +526,16 @@ const Card: React.FC<{
   subtitle: string;
   /** Make the smaller line bright and bold (used for the address). */
   strongSubtitle?: boolean;
+  /** Shrink the big line. Used when it is a whole sentence, not a name. */
+  smallTitle?: boolean;
   frames: number;
   aspect: Aspect;
-}> = ({ title, subtitle, strongSubtitle, frames, aspect }) => {
+}> = ({ title, subtitle, strongSubtitle, smallTitle, frames, aspect }) => {
   const frame = useCurrentFrame();
+  const settings = useSettings();
   const fade = toFrames(settings.timing.softFadeSeconds);
-  const { titleSize, subtitleSize } = settings.cards[aspect];
+  const { subtitleSize } = settings.cards[aspect];
+  const titleSize = settings.cards[aspect].titleSize * (smallTitle ? 0.6 : 1);
   const opacity = interpolate(frame, [0, fade, frames - fade, frames], [0, 1, 1, 0], CLAMP);
   // The text rises a little as it appears.
   const rise = interpolate(frame, [0, fade * 2], [30, 0], {
@@ -527,6 +579,115 @@ const Card: React.FC<{
           {subtitle}
         </div>
       ) : null}
+    </AbsoluteFill>
+  );
+};
+
+/** How-to videos: a small "1 of 6" label so viewers know where they are. */
+const Badge: React.FC<{ number: number; total: number; aspect: Aspect }> = ({
+  number,
+  total,
+  aspect,
+}) => {
+  const settings = useSettings();
+  const { fontSize, left, top } = settings.badge[aspect];
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left,
+        top,
+        fontSize,
+        fontWeight: 700,
+        color: "#ffffff",
+        backgroundColor: settings.colors.accent,
+        padding: "0.3em 0.8em",
+        borderRadius: 999,
+        boxShadow: "0 8px 24px rgba(0, 0, 0, 0.3)",
+      }}
+    >
+      {number} {settings.words.of} {total}
+    </div>
+  );
+};
+
+/** How-to videos: end card with the steps written out as a numbered list. */
+const RecapCard: React.FC<{
+  heading: string;
+  lines: string[];
+  address: string;
+  frames: number;
+  aspect: Aspect;
+}> = ({ heading, lines, address, frames, aspect }) => {
+  const frame = useCurrentFrame();
+  const settings = useSettings();
+  const fade = toFrames(settings.timing.softFadeSeconds);
+  const { headingSize } = settings.recap[aspect];
+  const { height } = settings.sizes[aspect];
+  const opacity = interpolate(frame, [0, fade, frames - fade, frames], [0, 1, 1, 0], CLAMP);
+  // Shrink the list text when there are many steps, so the whole list fits
+  // in about 60 percent of the frame height (each line takes about 1.7 times
+  // its text size).
+  const lineSize = Math.min(
+    settings.recap[aspect].lineSize,
+    (height * 0.6) / (Math.max(lines.length, 1) * 1.7),
+  );
+  return (
+    <AbsoluteFill
+      style={{
+        justifyContent: "center",
+        alignItems: "center",
+        padding: "0 90px",
+        opacity,
+        color: settings.colors.cardTitle,
+        overflowWrap: "anywhere",
+      }}
+    >
+      <div style={{ maxWidth: "100%" }}>
+        <div style={{ fontSize: headingSize, fontWeight: 700, lineHeight: 1.15 }}>{heading}</div>
+        <ol style={{ listStyle: "none", padding: 0, margin: `${headingSize * 0.6}px 0` }}>
+          {lines.map((line, position) => (
+            // The position is part of the key because two steps may share a caption.
+            <li
+              key={`${position}-${line}`}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.6em",
+                fontSize: lineSize,
+                lineHeight: 1.2,
+                marginBottom: "0.5em",
+                // Lines arrive one after another, like a list being written.
+                opacity: interpolate(
+                  frame,
+                  [fade + position * 4, 2 * fade + position * 4],
+                  [0, 1],
+                  CLAMP,
+                ),
+              }}
+            >
+              <span
+                style={{
+                  flexShrink: 0,
+                  width: "1.6em",
+                  height: "1.6em",
+                  borderRadius: "50%",
+                  backgroundColor: settings.colors.accent,
+                  display: "flex",
+                  justifyContent: "center",
+                  alignItems: "center",
+                  fontWeight: 700,
+                  fontSize: "0.8em",
+                }}
+              >
+                {position + 1}
+              </span>
+              {line}
+            </li>
+          ))}
+        </ol>
+        <div style={{ fontSize: lineSize, color: settings.colors.cardSubtitle }}>{address}</div>
+      </div>
     </AbsoluteFill>
   );
 };

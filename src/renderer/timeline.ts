@@ -8,7 +8,7 @@
  * plain script (see timeline.check.ts).
  */
 import type { Step, StepFile } from "../shared/stepFile";
-import { settings } from "./settings";
+import { FPS, type Settings, type Style } from "./settings";
 
 /** The two video shapes we can make. */
 export type Aspect = "16:9" | "9:16";
@@ -21,6 +21,8 @@ export type Aspect = "16:9" | "9:16";
 export type VideoProps = {
   stepFile: StepFile;
   aspect: Aspect;
+  /** Which look to use: pacing, zoom strength and text sizes. */
+  style: Style;
   /** True when a music file was found and the caller wants music. */
   music: boolean;
 };
@@ -47,6 +49,8 @@ export interface ScenePlan {
 /** One step of the video with its place on the timeline. */
 export interface Scene {
   step: Step;
+  /** Position among the steps shown in the video, starting at 1. */
+  number: number;
   /** First frame of the scene, counted from the start of the video. */
   from: number;
   /** Length of the scene in frames. */
@@ -61,6 +65,8 @@ export interface Scene {
 }
 
 export interface Timeline {
+  /** True for how-to videos: step badges and a written recap at the end. */
+  howto: boolean;
   /** Length of the title card at the very start. */
   titleFrames: number;
   scenes: Scene[];
@@ -74,7 +80,7 @@ export interface Timeline {
 
 /** Convert seconds to a whole number of frames. */
 export function toFrames(seconds: number): number {
-  return Math.round(seconds * settings.fps);
+  return Math.round(seconds * FPS);
 }
 
 /**
@@ -86,7 +92,7 @@ export function visibleSteps(stepFile: StepFile): Step[] {
 }
 
 /** How long one step stays on screen, in seconds. */
-export function sceneSeconds(step: Step): number {
+export function sceneSeconds(step: Step, settings: Settings): number {
   const { sceneSecondsWithoutAudio, paddingAfterAudio } = settings.timing;
   // A step only counts as narrated when it has both a file and a length.
   if (step.audioFile && step.audioSeconds) return step.audioSeconds + paddingAfterAudio;
@@ -94,7 +100,7 @@ export function sceneSeconds(step: Step): number {
 }
 
 /** Decide what happens inside a scene, based on the kind of step. */
-export function planScene(step: Step): ScenePlan {
+export function planScene(step: Step, settings: Settings): ScenePlan {
   const t = settings.timing;
   switch (step.action) {
     case "click":
@@ -143,11 +149,36 @@ export function planScene(step: Step): ScenePlan {
 /** Keep a number between two limits. */
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
+/**
+ * The line that stands for a step in the written recap of a how-to video.
+ * Uses the caption when there is one, otherwise the next best description.
+ */
+export function recapLine(step: Step): string {
+  return step.caption || step.narration || step.target;
+}
+
 /** Lay out title card, then the visible steps end to end, then the end card. */
-export function buildTimeline(stepFile: StepFile): Timeline {
+export function buildTimeline(stepFile: StepFile, settings: Settings): Timeline {
   const { width, height } = stepFile.viewport;
+  const howto = stepFile.mode === "howto";
   const titleFrames = toFrames(settings.timing.titleCardSeconds);
-  const endFrames = toFrames(settings.timing.endCardSeconds);
+  const endFrames = toFrames(
+    howto ? settings.timing.recapCardSeconds : settings.timing.endCardSeconds,
+  );
+
+  // Styles with a time limit keep as many steps from the start as fit
+  // between the two cards and drop the rest.
+  // ponytail: dropping from the end is the simplest way to honour the limit.
+  // Picking the most important steps instead would need help from the script
+  // stage.
+  let budget =
+    settings.maxSeconds === null
+      ? Infinity
+      : toFrames(settings.maxSeconds) - titleFrames - endFrames;
+  const steps = visibleSteps(stepFile).filter((step) => {
+    budget -= toFrames(sceneSeconds(step, settings));
+    return budget >= 0;
+  });
 
   let cursor = titleFrames;
   // Before the first step the cursor rests in the middle of the page.
@@ -155,21 +186,22 @@ export function buildTimeline(stepFile: StepFile): Timeline {
   let lastY = height / 2;
   const narration: Timeline["narration"] = [];
 
-  const scenes = visibleSteps(stepFile).map((step) => {
-    const frames = toFrames(sceneSeconds(step));
+  const scenes = steps.map((step, position) => {
+    const frames = toFrames(sceneSeconds(step, settings));
     // The agent may report a spot slightly outside the page. Pull it back
     // in so the cursor and the zoom never aim at empty space.
     const endX = clamp(step.x, 0, width);
     const endY = clamp(step.y, 0, height);
     const scene: Scene = {
       step,
+      number: position + 1,
       from: cursor,
       frames,
       startX: lastX,
       startY: lastY,
       endX,
       endY,
-      plan: planScene(step),
+      plan: planScene(step, settings),
     };
     if (step.audioFile && step.audioSeconds) {
       narration.push({ from: cursor, frames: toFrames(step.audioSeconds) });
@@ -181,6 +213,7 @@ export function buildTimeline(stepFile: StepFile): Timeline {
   });
 
   return {
+    howto,
     titleFrames,
     scenes,
     endFrom: cursor,
@@ -194,7 +227,7 @@ export function buildTimeline(stepFile: StepFile): Timeline {
  * How loud the music is on a given frame: quieter under narration, with a
  * smooth ramp on both sides, and a fade out at the end of the video.
  */
-export function musicVolume(frame: number, timeline: Timeline): number {
+export function musicVolume(frame: number, timeline: Timeline, settings: Settings): number {
   const { volume, volumeUnderNarration, rampSeconds, fadeOutSeconds } = settings.music;
   const ramp = Math.max(toFrames(rampSeconds), 1);
 
