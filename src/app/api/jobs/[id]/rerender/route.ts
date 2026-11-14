@@ -3,6 +3,8 @@
  * Body: { aspect?: "16:9" | "9:16", edits?: [{ id, hidden?, narration?, caption? }] }
  * Saves the edits and queues voice and render again. The agent does not run.
  */
+import fs from "node:fs";
+import path from "node:path";
 import { getJob, getJobDir, updateJob } from "../../../../../shared/jobs";
 import { isJobId } from "../../../../_lib/jobView";
 import { enqueueJob, isQueueFull } from "../../../../_lib/pipeline";
@@ -36,7 +38,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
 
   try {
-    const changed = writeRerenderRequest(getJobDir(id), parsed.data);
+    const jobFolder = getJobDir(id);
+    const changed = writeRerenderRequest(jobFolder, parsed.data);
+    if (changed > 0) {
+      // Only one format is rebuilt; drop the other so it cannot show the old steps.
+      const rebuilt = parsed.data.aspect ?? (job.style === "social" ? "9:16" : "16:9");
+      const stale = rebuilt === "9:16" ? "video-16x9.mp4" : "video-9x16.mp4";
+      fs.rmSync(path.join(jobFolder, stale), { force: true });
+    }
     updateJob(id, { status: "voicing", progressMessage: "Recording the voice" });
     enqueueJob(id);
     return Response.json({ ok: true, changed });

@@ -47,7 +47,8 @@ export function resumePendingJobs() {
   state.resumed = true;
   const jobs = listJobs({ limit: 500 }).reverse();
   for (const job of jobs) {
-    if (job.status === "queued") {
+    if (job.status === "queued" || (ACTIVE_STATUSES.includes(job.status) && readRerenderMarker(getJobDir(job.id)))) {
+      // A pending re-render is safe to resume: its marker skips the agent.
       state.queue.push(job.id);
     } else if (ACTIVE_STATUSES.includes(job.status) && job.id !== state.running) {
       updateJob(job.id, {
