@@ -4,13 +4,14 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { getJob, getJobDir, type Job } from "../../shared/jobs";
+import { getJob, getJobDir, listJobs, type Job } from "../../shared/jobs";
 import { validateStepFile, type StepFile } from "../../shared/stepFile";
 import type { AgentCostFile } from "../../agent/cost";
 import { findingsReportSchema, type FindingsReport } from "../../findings/findings";
 import { FPS, settingsFor } from "../../renderer/settings";
 import { buildTimeline } from "../../renderer/timeline";
 import { summarizeCost, type CostSummary } from "./costView";
+import { forecastBasis, type ForecastBasis } from "./forecast";
 import { queuePosition, resumePendingJobs } from "./pipeline";
 
 export interface JobView {
@@ -20,6 +21,8 @@ export interface JobView {
   videos: { landscape: string | null; vertical: string | null };
   thumbnail: string | null;
   cost: CostSummary | null;
+  /** Average fresh-run cost across finished jobs, for the Savings forecast. */
+  forecast: ForecastBasis | null;
   findings: FindingsReport | null;
   sceneStarts: Record<string, number>;
   /** Place in line while waiting (1 = next), otherwise 0. */
@@ -46,6 +49,15 @@ function readStepFile(jobId: string): StepFile | null {
   } catch {
     return null;
   }
+}
+
+/** Average the cost logs of finished jobs that recorded their own steps. */
+function readForecast(fallback: CostSummary | null): ForecastBasis | null {
+  const summaries = listJobs({ status: "done", limit: 200 })
+    .filter((job) => job.sourceJobId === null)
+    .map((job) => readCost(job.id))
+    .filter((summary): summary is CostSummary => summary !== null);
+  return forecastBasis(summaries) ?? (fallback ? forecastBasis([fallback]) : null);
 }
 
 /** Read and summarize a job's cost log when it is available and valid. */
@@ -106,12 +118,14 @@ export function getJobView(jobId: string): JobView | null {
     }
   }
 
+  const cost = readCost(jobId);
   return {
     job,
     stepFile,
     videos,
     thumbnail,
-    cost: readCost(jobId),
+    cost,
+    forecast: job.status === "done" ? readForecast(cost) : null,
     findings: readFindings(jobId),
     sceneStarts,
     queuePosition: queuePosition(jobId),
