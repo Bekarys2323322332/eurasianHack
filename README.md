@@ -147,6 +147,44 @@ After setting the four required model variables in `.env`, run
 Use `--mode demo --repo https://github.com/owner/repo` to include repository
 README context.
 
+## Add a voice and make the video from the command line
+
+Both steps work on a job folder that already has a `steps.json` (for example
+a copy of `fixtures/fake-job`). Run them with `npx tsx <file>` exactly as
+shown. This form works in PowerShell, cmd, bash and zsh. Do not use
+`npm run voice -- --job ...` or `npm run render -- --job ...` in PowerShell:
+it drops the flag names and the command stops with a usage message.
+
+```
+npx tsx src/voice/cli.ts --job data/jobs/my-job --language en
+npx tsx src/renderer/cli.ts --job data/jobs/my-job --aspect 16:9
+```
+
+**Voice** (`src/voice/cli.ts`) turns each step's narration text into
+`audio/<stepId>.mp3` and records the length in `steps.json`. It uses
+`LLM_API_KEY` and `LLM_BASE_URL` from `.env.local` or `.env`; no other key is
+needed. Lines made before are reused from `data/voice-cache` at no cost.
+
+| Option | Values | Default |
+|---|---|---|
+| `--job` | job folder | required |
+| `--language` | `en`, `ru` | `en` |
+| `--voice` | `sarah`, `george` | `sarah` |
+
+**Video** (`src/renderer/cli.ts`) writes `video-16x9.mp4` or `video-9x16.mp4`
+into the job folder. A step file with `"mode": "howto"` automatically gets
+step badges, a "How to ..." title card and a written recap at the end.
+
+| Option | Values | Default |
+|---|---|---|
+| `--job` | job folder | required |
+| `--aspect` | `16:9`, `9:16` | `9:16` for the social style, otherwise `16:9` |
+| `--style` | `trailer` (fast, strong zooms), `tutorial` (slow, gentle, pause after each step), `social` (quick cuts, large captions, 30 seconds at most) | `trailer` for demo videos, `tutorial` for how-to videos |
+| `--no-music` | leave out `public/music.mp3` even if it exists | music on |
+
+Checks that need no key and no network:
+`npx tsx src/renderer/timeline.check.ts` and `npx tsx src/voice/voice.check.ts`.
+
 ## Optional: Docker deployment
 
 The included Dockerfile packages Chromium and ffmpeg. Use a host that runs
