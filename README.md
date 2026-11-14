@@ -56,8 +56,7 @@ npm run setup
 ```
 
 Edit `.env` and fill in the four required values shown in `.env.example`.
-`TTS_API_KEY` is optional for now; without it, videos have no voiceover. Start
-the app:
+Narration and voice use the same model gateway configuration. Start the app:
 
 ```bash
 npm run demo
@@ -89,8 +88,7 @@ npm run setup
 ```
 
 Edit `.env` and fill in the four required values shown in `.env.example`.
-`TTS_API_KEY` is optional for now; without it, videos have no voiceover. Start
-the app:
+Narration and voice use the same model gateway configuration. Start the app:
 
 ```powershell
 npm run demo

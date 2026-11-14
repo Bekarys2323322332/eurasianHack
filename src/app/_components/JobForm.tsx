@@ -8,6 +8,7 @@
  */
 import { useRouter } from "next/navigation";
 import { useId, useState, type FormEvent } from "react";
+import { LANGUAGES } from "../../voice/config";
 import styles from "./ui.module.css";
 
 type Mode = "demo" | "howto";
@@ -27,9 +28,6 @@ const EXAMPLES: { label: string; mode: Mode; url: string; extra: string }[] = [
     extra: "How to search for an article and open it",
   },
 ];
-
-/** Languages offered under More options. Add entries here to offer more. */
-const LANGUAGES = [{ code: "en", name: "English" }];
 
 /** Returns a plain sentence when the value is not a web address, else null. */
 function checkWebAddress(value: string): string | null {
@@ -193,12 +191,13 @@ export default function JobForm() {
           value={language}
           onChange={(event) => setLanguage(event.target.value)}
         >
-          {LANGUAGES.map((option) => (
-            <option key={option.code} value={option.code}>
-              {option.name}
+          {Object.entries(LANGUAGES).map(([code, option]) => (
+            <option key={code} value={code}>
+              {option.label}
             </option>
           ))}
         </select>
+        <p className={styles.fieldNote}>Narration is written and spoken in this language.</p>
       </details>
 
       {error && (

@@ -7,6 +7,7 @@
 import { z } from "zod";
 import { createJob } from "../../../shared/jobs";
 import { JOB_MODES } from "../../../shared/stepFile";
+import { LANGUAGES } from "../../../voice/config";
 import { enqueueJob, isQueueFull } from "../../_lib/pipeline";
 
 export const runtime = "nodejs";
@@ -54,6 +55,16 @@ export async function POST(request: Request) {
   const { mode, url, language } = parsed.data;
   const repoUrl = parsed.data.repoUrl || null;
   const goal = parsed.data.goal || null;
+
+  if (!Object.hasOwn(LANGUAGES, language)) {
+    const choices = Object.values(LANGUAGES)
+      .map((option) => option.label)
+      .join(" or ");
+    return Response.json(
+      { error: `That language is not supported. Choose ${choices}.` },
+      { status: 400 },
+    );
+  }
 
   if (repoUrl && !webAddress.safeParse(repoUrl).success) {
     return Response.json(

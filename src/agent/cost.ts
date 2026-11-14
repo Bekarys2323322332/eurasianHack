@@ -1,6 +1,8 @@
 /**
  * Shared cost accounting for the agent's persisted call log and CLI summary.
  */
+import fs from "node:fs";
+import path from "node:path";
 
 /** One model call's aggregate usage, including its per-call price estimate. */
 export interface AgentCostCall {
@@ -34,6 +36,20 @@ export function addAgentCostCall(
   } else if (costFile.totalUsd !== null) {
     costFile.totalUsd += call.costUsd;
   }
+}
+
+/** Append a script or voice stage to the job's existing model cost log. */
+export function appendCostCall(
+  jobFolder: string,
+  stage: string,
+  call: Omit<AgentCostCall, "stage">,
+): void {
+  const costFilePath = path.join(jobFolder, "agent-cost.json");
+  const costFile = fs.existsSync(costFilePath)
+    ? (JSON.parse(fs.readFileSync(costFilePath, "utf8")) as AgentCostFile)
+    : createAgentCostFile();
+  addAgentCostCall(costFile, stage, call);
+  fs.writeFileSync(costFilePath, `${JSON.stringify(costFile, null, 2)}\n`, "utf8");
 }
 
 /** Return the first unpriced model name to explain why the total is unknown. */
