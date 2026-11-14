@@ -156,7 +156,7 @@ function makeLayout(stepFile: StepFile, aspect: Aspect, settings: Settings): Lay
 }
 
 /** The whole video: title card, one scene per visible step, end card. */
-export const JobVideo: React.FC<VideoProps> = ({ stepFile, aspect, style, music }) => {
+export const JobVideo: React.FC<VideoProps> = ({ stepFile, aspect, style, music, sfx = false }) => {
   const settings = settingsFor(style);
   const timeline = useMemo(() => buildTimeline(stepFile, settings), [stepFile, settings]);
   const layout = useMemo(
@@ -214,7 +214,7 @@ export const JobVideo: React.FC<VideoProps> = ({ stepFile, aspect, style, music 
           // Inside a Sequence, useCurrentFrame() starts again from 0, so each
           // scene can think in "frames since my own start".
           <Sequence key={scene.step.id} from={scene.from} durationInFrames={scene.frames}>
-            <SceneView scene={scene} layout={layout} aspect={aspect} address={address} />
+            <SceneView scene={scene} layout={layout} aspect={aspect} address={address} sfx={sfx} />
             {howto ? <Badge number={scene.number} total={scenes.length} aspect={aspect} /> : null}
           </Sequence>
         ))}
@@ -246,12 +246,58 @@ export const JobVideo: React.FC<VideoProps> = ({ stepFile, aspect, style, music 
 };
 
 /** One step: cursor glide, zoom in, click, change of picture, zoom out. */
+/** Sound effect volumes, kept under the narration. */
+const SFX = { click: 0.9, whoosh: 0.5, key: 0.4, keyEveryFrames: 3, maxKeys: 10 };
+
+/** Short sounds that line up with what the viewer sees: a whoosh as the scene arrives, a click, key ticks. */
+const SceneSounds: React.FC<{ scene: Scene }> = ({ scene }) => {
+  const { plan } = scene;
+  const keys: number[] = [];
+  if (plan.typing) {
+    for (let at = plan.typing.start; at < plan.typing.end && keys.length < SFX.maxKeys; at += SFX.keyEveryFrames) {
+      keys.push(at);
+    }
+  }
+  return (
+    <>
+      {scene.from > 0 ? (
+        <Sequence from={0} durationInFrames={Math.min(scene.frames, 20)}>
+          <Audio src={staticFile("sfx/whoosh.wav")} volume={SFX.whoosh} />
+        </Sequence>
+      ) : null}
+      {plan.rippleAt !== null && plan.rippleAt < scene.frames - 1 ? (
+        <Sequence from={plan.rippleAt} durationInFrames={Math.min(scene.frames - plan.rippleAt, 6)}>
+          <Audio src={staticFile("sfx/click.wav")} volume={SFX.click} />
+        </Sequence>
+      ) : null}
+      {keys.map((at) =>
+        at < scene.frames - 1 ? (
+          <Sequence key={at} from={at} durationInFrames={Math.min(scene.frames - at, 3)}>
+            <Audio src={staticFile("sfx/key.wav")} volume={SFX.key} />
+          </Sequence>
+        ) : null,
+      )}
+    </>
+  );
+};
+
+/** A soft dark edge that draws the eye to the middle of the picture. */
+const Vignette: React.FC<{ strength: number }> = ({ strength }) => (
+  <AbsoluteFill
+    style={{
+      pointerEvents: "none",
+      background: `radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,${0.45 * strength}) 100%)`,
+    }}
+  />
+);
+
 const SceneView: React.FC<{
   scene: Scene;
   layout: Layout;
   aspect: Aspect;
   address: string;
-}> = ({ scene, layout, aspect, address }) => {
+  sfx: boolean;
+}> = ({ scene, layout, aspect, address, sfx }) => {
   const frame = useCurrentFrame();
   const settings = useSettings();
   const { step, plan } = scene;
@@ -404,6 +450,8 @@ const SceneView: React.FC<{
         </AbsoluteFill>
       </AbsoluteFill>
 
+      <Vignette strength={0.6 + 0.4 * closeness} />
+      {sfx ? <SceneSounds scene={scene} /> : null}
       {step.audioFile ? <Audio src={staticFile(step.audioFile)} /> : null}
       {plan.typing && step.typedText ? (
         <TypingChip text={step.typedText} typing={plan.typing} aspect={aspect} />
