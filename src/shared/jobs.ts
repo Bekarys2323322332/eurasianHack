@@ -11,6 +11,8 @@ import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { defaultStyle, type Style } from "../renderer/settings";
+import { DEFAULT_AUDIENCE, type Audience } from "../shared/audiences";
 import type { JobMode } from "./stepFile";
 
 /** Every stage a job moves through, in order. "failed" can happen at any point. */
@@ -30,10 +32,14 @@ export type JobStatus = (typeof JOB_STATUSES)[number];
 export interface Job {
   id: string;
   mode: JobMode;
+  style: Style;
+  audience: Audience;
   url: string;
   repoUrl: string | null;
   goal: string | null;
   language: string;
+  /** Set when this job reuses another job's steps (another language) instead of running the agent. */
+  sourceJobId: string | null;
   status: JobStatus;
   /** Plain-words message shown in the progress view, e.g. "Exploring the site". */
   progressMessage: string | null;
@@ -43,10 +49,13 @@ export interface Job {
 
 export interface NewJob {
   mode: JobMode;
+  style?: Style;
+  audience?: Audience;
   url: string;
   repoUrl?: string | null;
   goal?: string | null;
   language?: string;
+  sourceJobId?: string | null;
 }
 
 /** Root folder for all runtime data. Defaults to ./data. */
@@ -77,6 +86,9 @@ export function getDb(): Database.Database {
     CREATE TABLE IF NOT EXISTS jobs (
       id              TEXT PRIMARY KEY,
       mode            TEXT NOT NULL,
+      style           TEXT,
+      audience        TEXT,
+      sourceJobId     TEXT,
       url             TEXT NOT NULL,
       repoUrl         TEXT,
       goal            TEXT,
@@ -87,6 +99,17 @@ export function getDb(): Database.Database {
     )
   `);
 
+  const columns = db.pragma("table_info(jobs)") as { name: string }[];
+  if (!columns.some(({ name }) => name === "style")) {
+    db.exec("ALTER TABLE jobs ADD COLUMN style TEXT");
+  }
+  if (!columns.some(({ name }) => name === "sourceJobId")) {
+    db.exec("ALTER TABLE jobs ADD COLUMN sourceJobId TEXT");
+  }
+  if (!columns.some(({ name }) => name === "audience")) {
+    db.exec("ALTER TABLE jobs ADD COLUMN audience TEXT");
+  }
+
   globalForDb.__jobsDb = db;
   return db;
 }
@@ -96,10 +119,13 @@ export function createJob(input: NewJob): Job {
   const job: Job = {
     id: randomUUID().replace(/-/g, "").slice(0, 12),
     mode: input.mode,
+    style: input.style ?? defaultStyle(input.mode),
+    audience: input.audience ?? DEFAULT_AUDIENCE,
     url: input.url,
     repoUrl: input.repoUrl ?? null,
     goal: input.goal ?? null,
     language: input.language ?? "en",
+    sourceJobId: input.sourceJobId ?? null,
     status: "queued",
     progressMessage: "Waiting to start",
     createdAt: new Date().toISOString(),
@@ -107,8 +133,8 @@ export function createJob(input: NewJob): Job {
 
   getDb()
     .prepare(
-      `INSERT INTO jobs (id, mode, url, repoUrl, goal, language, status, progressMessage, createdAt)
-       VALUES (@id, @mode, @url, @repoUrl, @goal, @language, @status, @progressMessage, @createdAt)`,
+      `INSERT INTO jobs (id, mode, style, audience, url, repoUrl, goal, language, sourceJobId, status, progressMessage, createdAt)
+       VALUES (@id, @mode, @style, @audience, @url, @repoUrl, @goal, @language, @sourceJobId, @status, @progressMessage, @createdAt)`,
     )
     .run(job);
 
@@ -117,19 +143,37 @@ export function createJob(input: NewJob): Job {
 
 /** Read one job, or null if it does not exist. */
 export function getJob(id: string): Job | null {
-  const row = getDb().prepare(`SELECT * FROM jobs WHERE id = ?`).get(id) as Job | undefined;
-  return row ?? null;
+  const row = getDb().prepare(`SELECT * FROM jobs WHERE id = ?`).get(id) as JobRow | undefined;
+  return row ? fromJobRow(row) : null;
 }
 
 /** List jobs, newest first. Optionally filter by status. */
 export function listJobs(options: { status?: JobStatus; limit?: number } = {}): Job[] {
   const limit = options.limit ?? 50;
   if (options.status) {
-    return getDb()
+    const rows = getDb()
       .prepare(`SELECT * FROM jobs WHERE status = ? ORDER BY createdAt DESC LIMIT ?`)
-      .all(options.status, limit) as Job[];
+      .all(options.status, limit) as JobRow[];
+    return rows.map(fromJobRow);
   }
-  return getDb().prepare(`SELECT * FROM jobs ORDER BY createdAt DESC LIMIT ?`).all(limit) as Job[];
+  const rows = getDb().prepare(`SELECT * FROM jobs ORDER BY createdAt DESC LIMIT ?`).all(limit) as JobRow[];
+  return rows.map(fromJobRow);
+}
+
+type JobRow = Omit<Job, "style" | "audience" | "sourceJobId"> & {
+  style: Style | null;
+  audience: Audience | null;
+  sourceJobId?: string | null;
+};
+
+/** Fill preferences on rows created before style or audience were stored. */
+function fromJobRow(row: JobRow): Job {
+  return {
+    ...row,
+    style: row.style ?? defaultStyle(row.mode),
+    audience: row.audience ?? DEFAULT_AUDIENCE,
+    sourceJobId: row.sourceJobId ?? null,
+  };
 }
 
 /** Fields that may change after a job is created. */

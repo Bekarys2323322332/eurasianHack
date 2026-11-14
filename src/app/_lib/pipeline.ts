@@ -6,14 +6,20 @@
  * were created. The queue lives on globalThis so Next's dev reloads do not
  * create a second copy.
  */
+import fs from "node:fs";
+import path from "node:path";
 import { getJob, getJobDir, listJobs, updateJob, type Job } from "../../shared/jobs";
 import { LANGUAGES } from "../../voice/config";
+import { copyStepsForNewJob } from "./reuseSteps";
+import { clearRerenderMarker, readRerenderMarker } from "./rerender";
+import type { StepFile } from "../../shared/stepFile";
 import {
   appendCostCall,
   generateVoice,
   PROVIDER_NAME,
   renderJob,
   runAgent,
+  writeFindings,
   writeScript,
 } from "./stages";
 
@@ -43,7 +49,8 @@ export function resumePendingJobs() {
   state.resumed = true;
   const jobs = listJobs({ limit: 500 }).reverse();
   for (const job of jobs) {
-    if (job.status === "queued") {
+    if (job.status === "queued" || (ACTIVE_STATUSES.includes(job.status) && readRerenderMarker(getJobDir(job.id)))) {
+      // A pending re-render is safe to resume: its marker skips the agent.
       state.queue.push(job.id);
     } else if (ACTIVE_STATUSES.includes(job.status) && job.id !== state.running) {
       updateJob(job.id, {
@@ -101,46 +108,117 @@ function plainFailure(stage: string, error: unknown): string {
 }
 
 /** Run every stage for one job and keep its status up to date. */
+/** Findings are a bonus: a failure here is logged and never fails the job. */
+async function writeFindingsSafely(jobId: string, jobFolder: string, languageName: string) {
+  try {
+    updateJob(jobId, { status: "scripting", progressMessage: "Writing up what we found" });
+    const findingsCall = await writeFindings(jobFolder, { languageName });
+    if (findingsCall) appendCostCall(jobFolder, "findings", findingsCall);
+  } catch (error) {
+    console.warn(`Could not write findings for job ${jobId}; continuing without them.`, error);
+  }
+}
+
+type Aspect = "16:9" | "9:16";
+
+/** Voice and render, shared by fresh jobs and re-renders. Returns the stage name on failure. */
+async function recordVoiceAndRender(job: Job, aspect: Aspect, setStage: (stage: string) => void) {
+  const jobId = job.id;
+  const jobFolder = getJobDir(jobId);
+  setStage("recording the voice");
+  updateJob(jobId, { status: "voicing", progressMessage: "Recording the voice" });
+  const voiceSummary = await generateVoice(jobFolder, { language: job.language });
+  appendCostCall(jobFolder, "voice", {
+    model: PROVIDER_NAME,
+    inputTokens: 0,
+    outputTokens: 0,
+    costUsd: voiceSummary.totalCost,
+    cacheHit: voiceSummary.generated === 0 && voiceSummary.cached > 0,
+  });
+  if (voiceSummary.failed > 0) {
+    console.warn(
+      `Voice generation failed for ${voiceSummary.failed} step(s); the renderer will use silent audio for them.`,
+      voiceSummary.failures,
+    );
+  }
+
+  setStage("building the video");
+  updateJob(jobId, { status: "rendering", progressMessage: "Building the video" });
+  let lastPercent = -1;
+  await renderJob(jobFolder, { aspect, music: true, style: job.style }, (percent) => {
+    // Write at most every 5 percent so the database is not flooded.
+    if (percent >= lastPercent + 5 || percent === 100) {
+      lastPercent = percent;
+      updateJob(jobId, { progressMessage: `Building the video (${percent}% done)` });
+    }
+  });
+}
+
+/** The format a job renders in unless a re-render asks for the other one. */
+function defaultAspect(job: Job): Aspect {
+  return job.style === "social" ? "9:16" : "16:9";
+}
+
 async function runPipeline(jobId: string) {
   const job = getJob(jobId);
   if (!job) return;
   let stage = "exploring the site";
   try {
-    await runAgent(job);
+    const jobFolder = getJobDir(jobId);
+    const languageName = LANGUAGES[job.language]?.label ?? "English";
+
+    const rerender = readRerenderMarker(jobFolder);
+    if (rerender) {
+      stage = "recording the voice";
+      try {
+        await recordVoiceAndRender(job, rerender.aspect ?? defaultAspect(job), (name) => {
+          stage = name;
+        });
+        if (rerender.removeAfter) fs.rmSync(path.join(jobFolder, rerender.removeAfter), { force: true });
+      } finally {
+        clearRerenderMarker(jobFolder);
+      }
+      updateJob(jobId, { status: "done", progressMessage: "Your video is ready" });
+      return;
+    }
+
+    let stepFile: StepFile;
+    if (job.sourceJobId) {
+      stage = "reusing the recorded steps";
+      updateJob(jobId, { status: "scripting", progressMessage: "Reusing the recorded steps" });
+      stepFile = copyStepsForNewJob(getJobDir(job.sourceJobId), jobFolder, jobId, job.language);
+    } else {
+      stepFile = (await runAgent(job)).stepFile;
+    }
+
+    if (stepFile.goalAchieved === false) {
+      await writeFindingsSafely(jobId, jobFolder, languageName);
+      updateJob(jobId, {
+        status: "done",
+        progressMessage: stepFile.resultText?.trim() || "The agent could not finish this route.",
+      });
+      return;
+    }
 
     stage = "writing the script";
     updateJob(jobId, { status: "scripting", progressMessage: "Writing the script" });
-    const jobFolder = getJobDir(jobId);
-    const scriptCall = await writeScript(jobFolder, {
-      languageName: LANGUAGES[job.language]?.label ?? "English",
+    const scriptCall = await writeScript(jobFolder, { languageName, style: job.style });
+    appendCostCall(jobFolder, "script", {
+      model: scriptCall.model,
+      inputTokens: scriptCall.inputTokens,
+      outputTokens: scriptCall.outputTokens,
+      costUsd: scriptCall.costUsd,
+      tier: scriptCall.tier,
+      escalated: scriptCall.escalated,
+      cacheHit: scriptCall.cacheHit,
+      baselineCostUsd: scriptCall.baselineCostUsd,
     });
-    appendCostCall(jobFolder, "script", scriptCall);
 
-    stage = "recording the voice";
-    updateJob(jobId, { status: "voicing", progressMessage: "Recording the voice" });
-    const voiceSummary = await generateVoice(jobFolder, { language: job.language });
-    appendCostCall(jobFolder, "voice", {
-      model: PROVIDER_NAME,
-      inputTokens: 0,
-      outputTokens: 0,
-      costUsd: voiceSummary.totalCost,
-    });
-    if (voiceSummary.failed > 0) {
-      console.warn(
-        `Voice generation failed for ${voiceSummary.failed} step(s); the renderer will use silent audio for them.`,
-        voiceSummary.failures,
-      );
-    }
+    stage = "writing up what we found";
+    if (!job.sourceJobId) await writeFindingsSafely(jobId, jobFolder, languageName);
 
-    stage = "building the video";
-    updateJob(jobId, { status: "rendering", progressMessage: "Building the video" });
-    let lastPercent = -1;
-    await renderJob(getJobDir(jobId), { aspect: "16:9", music: true }, (percent) => {
-      // Write at most every 5 percent so the database is not flooded.
-      if (percent >= lastPercent + 5 || percent === 100) {
-        lastPercent = percent;
-        updateJob(jobId, { progressMessage: `Building the video (${percent}% done)` });
-      }
+    await recordVoiceAndRender(job, defaultAspect(job), (name) => {
+      stage = name;
     });
 
     updateJob(jobId, { status: "done", progressMessage: "Your video is ready" });

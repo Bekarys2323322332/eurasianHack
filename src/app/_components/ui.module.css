@@ -108,7 +108,7 @@
 
 .modeText {
   color: var(--muted);
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.4;
 }
 
@@ -145,12 +145,12 @@
 
 .fieldHint {
   color: var(--warning);
-  font-size: 15px;
+  font-size: 16px;
 }
 
 .fieldNote {
   color: var(--muted);
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.5;
 }
 
@@ -243,14 +243,14 @@
 
 .examplesLabel {
   color: var(--muted);
-  font-size: 15px;
+  font-size: 16px;
 }
 
 .chip {
   min-height: 44px;
   padding: 0 14px;
   font: inherit;
-  font-size: 15px;
+  font-size: 16px;
   color: var(--foreground);
   background: transparent;
   border: 1px solid var(--border);
@@ -282,7 +282,7 @@
 .howNumber {
   color: var(--accent);
   font-weight: 700;
-  font-size: 15px;
+  font-size: 16px;
 }
 
 .howTitle {
@@ -292,7 +292,7 @@
 
 .howText {
   color: var(--muted);
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.5;
 }
 
@@ -459,6 +459,14 @@
   border: 1px solid var(--border);
 }
 
+.videoVertical {
+  width: auto;
+  max-width: 100%;
+  height: min(80vh, 720px);
+  aspect-ratio: 9 / 16;
+  align-self: center;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -469,6 +477,21 @@
 .actions .secondary {
   margin-top: 0;
   flex: 1 1 180px;
+}
+
+.audienceCut {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.audienceCutLabel {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.audienceCut .secondary {
+  margin-top: 0;
 }
 
 .panels {
@@ -498,6 +521,257 @@
   line-height: 1.5;
 }
 
+.findingsSummary {
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.findingsList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.findingCard {
+  display: grid;
+  grid-template-columns: minmax(0, 108px) minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px;
+  color: var(--foreground);
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.findingCard:hover,
+.findingCard:focus-visible {
+  border-color: var(--accent);
+}
+
+.findingScreenshot {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.findingCardText {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  min-width: 0;
+}
+
+.findingSeverity,
+.findingStep {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.findingDescription {
+  font-size: 16px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.findingCard:disabled {
+  cursor: default;
+}
+
+.stepDeadend {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.stepAction {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.resultText {
+  font-size: 18px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.findingsList li {
+  list-style: none;
+}
+
+.findingsCopy {
+  width: 100%;
+  margin-top: 0;
+}
+
+.audienceDescription {
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.costPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.costMetric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.costAmount {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.costExplanation,
+.costNumberNote,
+.costDetailLine {
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.costTableWrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.costTable {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.costTable th,
+.costTable td {
+  padding: 10px 6px;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.costTable th:first-child {
+  width: 38%;
+}
+
+.costTable th:nth-child(2) {
+  width: 24%;
+}
+
+.costTable th:nth-child(3) {
+  width: 38%;
+}
+
+.costTable thead th {
+  border-bottom: 1px solid var(--border);
+  font-weight: 700;
+}
+
+.costTable tbody tr + tr {
+  border-top: 1px solid var(--border);
+}
+
+.costTable .costTableNotes td {
+  padding-top: 2px;
+  border-top: 0;
+}
+
+.costTableNotes span {
+  display: block;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.costVoice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.costNumberNote {
+  display: block;
+  margin-top: 4px;
+}
+
+.costDetails > summary {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.costDetailsList {
+  display: flex;
+  flex-direction: column;
+}
+
+.costDetail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+
+.costDetailTitle {
+  font-size: 17px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.costDetailLine {
+  color: var(--foreground);
+}
+
+.costBadgeGroup {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.costBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  max-width: 100%;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--foreground);
+  font-size: 16px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 760px) {
   .page {
     padding: 20px 16px 48px;
@@ -513,4 +787,130 @@
   .doneLayout {
     grid-template-columns: 1fr;
   }
+}
+
+.forecastLabel {
+  font-size: 16px;
+  color: var(--muted);
+}
+
+.forecastSlider {
+  width: 100%;
+  accent-color: var(--accent, #7c6cff);
+}
+
+.forecastFigures {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.forecastChart {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.forecastBar {
+  height: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.forecastBarFill {
+  height: 100%;
+  background: var(--accent, #7c6cff);
+  border-radius: 7px;
+  transition: width 120ms ease-out;
+}
+
+.forecastBar:first-child .forecastBarFill {
+  opacity: 0.45;
+}
+
+.forecastSentence {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.inlineLink {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.formatSwitch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.formatButton {
+  min-height: 40px;
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 15px;
+  color: var(--foreground);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.formatButton:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.formatButtonActive {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.stepEditCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.stepHiddenCard .stepEditCard {
+  opacity: 0.6;
+}
+
+.stepEditHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.stepEditLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.stepTextarea {
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 15px;
+  color: var(--foreground);
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  resize: vertical;
 }

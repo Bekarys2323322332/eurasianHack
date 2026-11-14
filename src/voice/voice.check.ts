@@ -79,9 +79,8 @@ async function main() {
   // Fake provider: counts speech requests, refuses the text "BROKEN".
   let speechCalls = 0;
   globalThis.fetch = (async (url: string, init?: RequestInit) => {
-    if (String(url).includes("/generation")) {
-      return new Response(JSON.stringify({ data: { total_cost: 0.001 } }));
-    }
+    // The cost is calculated locally now. Asking the provider for it would be a bug.
+    assert.ok(!String(url).includes("/generation"), "cost must not be looked up");
     speechCalls += 1;
     if (String(init?.body).includes("BROKEN")) return new Response("upstream error", { status: 502 });
     return new Response(new Uint8Array(fakeMp3(50)), { headers: { "x-generation-id": "gen-1" } });
@@ -93,7 +92,11 @@ async function main() {
   assert.equal(first.failed, 1);
   assert.equal(first.failures[0].stepId, "s2");
   assert.equal(speechCalls, 4); // two good lines, plus the broken one tried twice
-  assert.ok(Math.abs((first.totalCost ?? 0) - 0.002) < 1e-9);
+  // Two lines of 6 characters each ("Line 1", "Line 6") at 0.00008 dollars a
+  // character. The broken line was tried twice but made no audio: no cost.
+  assert.equal(first.cost, 0.00096);
+  assert.equal(first.costSource, "calculated");
+  assert.equal(first.totalCost, first.cost);
 
   const steps = JSON.parse(fs.readFileSync(path.join(job, "steps.json"), "utf8")).steps;
   assert.equal(steps[0].audioFile, "audio/s1.mp3");
@@ -108,6 +111,7 @@ async function main() {
   const second = await generateVoice(job, { language: "en" });
   assert.equal(second.generated, 0);
   assert.equal(second.cached, 2);
+  assert.equal(second.cost, 0); // cached lines cost nothing
   assert.equal(speechCalls, 2);
 
   // A different voice is a different cache entry.

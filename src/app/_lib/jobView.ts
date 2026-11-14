@@ -4,8 +4,15 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { getJob, getJobDir, type Job } from "../../shared/jobs";
+import { getJob, getJobDir, listJobs, type Job } from "../../shared/jobs";
 import { validateStepFile, type StepFile } from "../../shared/stepFile";
+import type { AgentCostFile } from "../../agent/cost";
+import { findingsReportSchema, type FindingsReport } from "../../findings/findings";
+import { FPS, settingsFor } from "../../renderer/settings";
+import { buildTimeline } from "../../renderer/timeline";
+import { summarizeCost, type CostSummary } from "./costView";
+import { forecastBasis, type ForecastBasis } from "./forecast";
+import { readRerenderMarker } from "./rerender";
 import { queuePosition, resumePendingJobs } from "./pipeline";
 
 export interface JobView {
@@ -14,6 +21,11 @@ export interface JobView {
   /** App-relative links (for example /api/jobs/abc/files/video-16x9.mp4). */
   videos: { landscape: string | null; vertical: string | null };
   thumbnail: string | null;
+  cost: CostSummary | null;
+  /** Average fresh-run cost across finished jobs, for the Savings forecast. */
+  forecast: ForecastBasis | null;
+  findings: FindingsReport | null;
+  sceneStarts: Record<string, number>;
   /** Place in line while waiting (1 = next), otherwise 0. */
   queuePosition: number;
 }
@@ -40,6 +52,42 @@ function readStepFile(jobId: string): StepFile | null {
   }
 }
 
+/** Average the cost logs of finished jobs that recorded their own steps. */
+function readForecast(fallback: CostSummary | null): ForecastBasis | null {
+  const summaries = listJobs({ status: "done", limit: 200 })
+    .filter((job) => job.sourceJobId === null)
+    .map((job) => readCost(job.id))
+    .filter((summary): summary is CostSummary => summary !== null);
+  return forecastBasis(summaries) ?? (fallback ? forecastBasis([fallback]) : null);
+}
+
+/** Read and summarize a job's cost log when it is available and valid. */
+function readCost(jobId: string): CostSummary | null {
+  const file = path.join(getJobDir(jobId), "agent-cost.json");
+  if (!fs.existsSync(file)) return null;
+
+  try {
+    const costFile = JSON.parse(fs.readFileSync(file, "utf8")) as AgentCostFile;
+    if (!Array.isArray(costFile.calls)) return null;
+    return summarizeCost(costFile, process.env.STRONG_MODEL ?? null);
+  } catch {
+    return null;
+  }
+}
+
+/** Read a validated findings report when one was written successfully. */
+function readFindings(jobId: string): FindingsReport | null {
+  const file = path.join(getJobDir(jobId), "findings.json");
+  if (!fs.existsSync(file)) return null;
+
+  try {
+    const report = findingsReportSchema.safeParse(JSON.parse(fs.readFileSync(file, "utf8")));
+    return report.success ? report.data : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Build the job view, or null if the job does not exist. */
 export function getJobView(jobId: string): JobView | null {
   if (!isJobId(jobId)) return null;
@@ -48,8 +96,10 @@ export function getJobView(jobId: string): JobView | null {
   if (!job) return null;
 
   const dir = getJobDir(jobId);
+  // During a re-render the previous video stays reachable until the new one replaces it.
+  const videosReady = job.status === "done" || readRerenderMarker(dir) !== null;
   const fileIfExists = (name: string) =>
-    job.status === "done" && fs.existsSync(path.join(dir, name)) ? jobFileUrl(jobId, name) : null;
+    videosReady && fs.existsSync(path.join(dir, name)) ? jobFileUrl(jobId, name) : null;
 
   const stepFile = readStepFile(jobId);
   const firstShown = stepFile?.steps.find((step) => step.status === "ok" && !step.hidden);
@@ -57,12 +107,30 @@ export function getJobView(jobId: string): JobView | null {
     firstShown && fs.existsSync(path.join(dir, firstShown.screenshotAfter))
       ? jobFileUrl(jobId, firstShown.screenshotAfter)
       : null;
+  const videos = {
+    landscape: fileIfExists("video-16x9.mp4"),
+    vertical: fileIfExists("video-9x16.mp4"),
+  };
+  const aspect = videos.landscape ? "16:9" : videos.vertical ? "9:16" : null;
+  const selectedVideo = aspect === "9:16" ? videos.vertical : videos.landscape;
+  const sceneStarts: Record<string, number> = {};
+  if (stepFile && selectedVideo) {
+    const timeline = buildTimeline(stepFile, settingsFor(job.style));
+    for (const scene of timeline.scenes) {
+      sceneStarts[scene.step.id] = scene.from / FPS;
+    }
+  }
 
+  const cost = readCost(jobId);
   return {
     job,
     stepFile,
-    videos: { landscape: fileIfExists("video-16x9.mp4"), vertical: fileIfExists("video-9x16.mp4") },
+    videos,
     thumbnail,
+    cost,
+    forecast: job.status === "done" ? readForecast(cost) : null,
+    findings: readFindings(jobId),
+    sceneStarts,
     queuePosition: queuePosition(jobId),
   };
 }

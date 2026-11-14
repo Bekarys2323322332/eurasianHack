@@ -8,9 +8,15 @@
  * back to it later.
  */
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useId, useRef, useState } from "react";
+import { AUDIENCES, type Audience } from "../../shared/audiences";
+import { LANGUAGES } from "../../voice/config";
 import type { JobView } from "../_lib/jobView";
+import type { Step, StepFile } from "../../shared/stepFile";
+import type { CostSummary } from "../_lib/costView";
+import { FORECAST_LIMITS, forecastMonthly, type ForecastBasis } from "../_lib/forecast";
 import { toPublicUrl } from "../../shared/publicUrl";
 import styles from "./ui.module.css";
 
@@ -58,13 +64,530 @@ function timeLeftText(seconds: number, queued: number) {
   return `About ${minutes} minute${minutes === 1 ? "" : "s"} left`;
 }
 
+/** Format money with more precision for small totals. */
+function formatMoney(amount: number): string {
+  if (amount >= 1) return `$${amount.toFixed(2)}`;
+  if (amount >= 0.01) return `$${amount.toFixed(3)}`;
+  return `$${amount.toFixed(4)}`;
+}
+
+/** Whole dollars for monthly totals, cents below $10. */
+function formatMonthly(amount: number): string {
+  if (amount >= 10) return `$${Math.round(amount).toLocaleString("en-US")}`;
+  return `$${amount.toFixed(2)}`;
+}
+
+/** Two sliders, three monthly figures and a bar chart, all from the cost log. */
+function SavingsForecast({ basis }: { basis: ForecastBasis }) {
+  const [videos, setVideos] = useState<number>(FORECAST_LIMITS.videos.default);
+  const [discount, setDiscount] = useState<number>(FORECAST_LIMITS.discount.default);
+  const videosId = useId();
+  const discountId = useId();
+  const figures = forecastMonthly(basis, videos, discount);
+  const bars = [
+    { label: "Strong model for everything", value: figures.strongUsd },
+    { label: "With routing and cache", value: figures.routedUsd },
+    { label: `With reserved capacity (${discount}% off)`, value: figures.reservedUsd },
+  ];
+  const widest = Math.max(figures.strongUsd, 0.000001);
+
+  return (
+    <div className={styles.costPanel}>
+      <label className={styles.forecastLabel} htmlFor={videosId}>
+        Videos per month: <strong>{videos.toLocaleString("en-US")}</strong>
+      </label>
+      <input
+        id={videosId}
+        type="range"
+        className={styles.forecastSlider}
+        min={FORECAST_LIMITS.videos.min}
+        max={FORECAST_LIMITS.videos.max}
+        step={10}
+        value={videos}
+        onChange={(event) => setVideos(Number(event.target.value))}
+      />
+
+      <div className={styles.forecastFigures}>
+        {bars.map((bar) => (
+          <div className={styles.costMetric} key={bar.label}>
+            <p className={styles.costAmount}>{formatMonthly(bar.value)}</p>
+            <p className={styles.costExplanation}>{bar.label}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className={styles.forecastChart} role="img" aria-label={bars.map((b) => `${b.label}: ${formatMonthly(b.value)}`).join(". ")}>
+        {bars.map((bar) => (
+          <div className={styles.forecastBar} key={bar.label}>
+            <div className={styles.forecastBarFill} style={{ width: `${Math.max(2, (bar.value / widest) * 100)}%` }} />
+          </div>
+        ))}
+      </div>
+
+      <p className={styles.forecastSentence}>
+        At {videos.toLocaleString("en-US")} videos a month you would save {formatMonthly(figures.savedUsd)} a month.
+      </p>
+
+      <label className={styles.forecastLabel} htmlFor={discountId}>
+        Reserved-capacity discount: <strong>{discount}%</strong>
+      </label>
+      <input
+        id={discountId}
+        type="range"
+        className={styles.forecastSlider}
+        min={FORECAST_LIMITS.discount.min}
+        max={FORECAST_LIMITS.discount.max}
+        step={1}
+        value={discount}
+        onChange={(event) => setDiscount(Number(event.target.value))}
+      />
+      <p className={styles.costNumberNote}>
+        The discount is an assumption you can change; it stands for buying model capacity in advance. The per-video
+        figures are the average of {basis.videosCounted} fresh {basis.videosCounted === 1 ? "run" : "runs"}:{" "}
+        {formatMoney(basis.averageCostUsd)} with routing, {formatMoney(basis.averageBaselineUsd)} on the strong model.
+      </p>
+    </div>
+  );
+}
+
+/** Show the cost summary and the model usage details for one job. */
+function CostPanel({ summary }: { summary: CostSummary }) {
+  return (
+    <div className={styles.costPanel}>
+      <div className={styles.costMetric}>
+        <p className={styles.costAmount}>This video cost {formatMoney(summary.costUsd)}</p>
+        <p className={styles.costExplanation}>What the AI work for this video cost.</p>
+      </div>
+
+      <div className={styles.costMetric}>
+        <p className={styles.costAmount}>Without routing: {formatMoney(summary.baselineCostUsd)}</p>
+        <p className={styles.costExplanation}>If every AI step used the strongest model and nothing was reused.</p>
+      </div>
+
+      {summary.percentSaved !== null && (
+        <div className={styles.costMetric}>
+          <p className={styles.costAmount}>{summary.percentSaved}% saved</p>
+          <p className={styles.costExplanation}>Simple steps went to a cheaper model.</p>
+        </div>
+      )}
+
+      <div className={styles.costTableWrap}>
+        <table className={styles.costTable}>
+          <thead>
+            <tr>
+              <th scope="col">Stage</th>
+              <th scope="col">Times</th>
+              <th scope="col">Cost</th>
+            </tr>
+          </thead>
+          <tbody>
+            {summary.modelStages.map((stage) => (
+              <Fragment key={stage.label}>
+                <tr>
+                  <th scope="row">{stage.label}</th>
+                  <td>{stage.calls}</td>
+                  <td>{stage.costUsd === null ? "not available" : formatMoney(stage.costUsd)}</td>
+                </tr>
+                {stage.unknown && stage.costUsd !== null && (
+                  <tr className={styles.costTableNotes}>
+                    <td colSpan={3}>
+                      <span>Some calls have no reported price.</span>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className={styles.costNumberNote}>
+        Times: how many AI calls this stage made. Cost: what they cost.
+      </p>
+
+      {summary.voice && (
+        <div className={styles.costVoice}>
+          <h3 className={styles.costDetailTitle}>Voice</h3>
+          <p className={styles.costAmount}>
+            {summary.voice.costUsd === null ? "not available" : formatMoney(summary.voice.costUsd)}
+          </p>
+          <p className={styles.costExplanation}>Recording the narration. Routing does not apply here.</p>
+          {summary.voice.reused && <span className={styles.costBadge}>Reused</span>}
+        </div>
+      )}
+
+      <details className={styles.costDetails}>
+        <summary>Show details</summary>
+        <div className={styles.costDetailsList}>
+          <p className={styles.costExplanation}>
+            Which models answered, which routing tier they used, and how much text they read and wrote.
+          </p>
+          {summary.modelStages.map((stage) => (
+            <section className={styles.costDetail} key={stage.label}>
+              <h3 className={styles.costDetailTitle}>{stage.label}</h3>
+              <p className={styles.costDetailLine}>
+                <strong>Models:</strong> {stage.models.length ? stage.models.join(", ") : "Not recorded"}
+              </p>
+              <p className={styles.costDetailLine}>
+                <strong>Tiers:</strong> {stage.tiers.length ? stage.tiers.join(", ") : "Not recorded"}
+              </p>
+              <p className={styles.costDetailLine}>
+                <strong>Tokens in/out:</strong>{" "}
+                {stage.inputTokens.toLocaleString()} / {stage.outputTokens.toLocaleString()}
+              </p>
+              {stage.cacheHits > 0 && (
+                <span className={styles.costBadge}>
+                  Reused{stage.cacheHits > 1 ? ` (${stage.cacheHits})` : ""}
+                </span>
+              )}
+              {Array.from({ length: stage.escalations }, (_, index) => (
+                <span
+                  className={styles.costBadge}
+                  key={`${stage.label}-escalation-${index}`}
+                >
+                  Moved to the stronger model
+                </span>
+              ))}
+            </section>
+          ))}
+        </div>
+      </details>
+    </div>
+  );
+}
+
+type FindingItem = NonNullable<JobView["findings"]>["findings"][number];
+
+const MAX_FINDINGS_SHOWN = 5;
+
+const SEVERITY_LABELS = {
+  high: "Serious",
+  medium: "Worth fixing",
+  low: "Minor",
+} as const;
+
+function findingScreenshotUrl(jobId: string, screenshot: string): string {
+  const encodedPath = screenshot.split("/").map(encodeURIComponent).join("/");
+  return `/api/jobs/${jobId}/files/${encodedPath}`;
+}
+
+const MAX_STEPS_SHOWN = 6;
+
+/** The agent's reasons can run to a paragraph; show the first sentence, trimmed. */
+function shortReason(text: string): string {
+  const firstSentence = text.trim().match(/^[^.!?]*[.!?]?/)?.[0]?.trim() ?? text.trim();
+  return firstSentence.length > 140 ? `${firstSentence.slice(0, 137).trimEnd()}...` : firstSentence;
+}
+
+const ACTION_LABELS: Record<Step["action"], (step: Step) => string> = {
+  click: (step) => `Clicked "${step.target}"`,
+  type: (step) => `Typed into "${step.target}"`,
+  scroll: (step) => `Scrolled ${step.target ? `to "${step.target}"` : "the page"}`,
+  navigate: (step) => `Opened ${step.target || "the page"}`,
+  wait: () => "Waited for the page",
+};
+
+export interface StepEdit {
+  id: string;
+  hidden?: boolean;
+  narration?: string;
+  caption?: string;
+}
+
+function StepsPanel({
+  jobId,
+  stepFile,
+  sceneStarts,
+  onSelect,
+  onRerender,
+}: {
+  jobId: string;
+  stepFile: StepFile | null;
+  /** Steps that have a scene in the video; trimmed steps are not clickable. */
+  sceneStarts: Record<string, number>;
+  onSelect: ((step: Step) => void) | null;
+  /** Save edits and build the video again; null when editing is not possible. */
+  onRerender: ((edits: StepEdit[]) => Promise<string | null>) | null;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [edits, setEdits] = useState<Record<string, StepEdit>>({});
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const allSteps = stepFile?.steps ?? [];
+  const steps = editing ? allSteps : allSteps.filter((step) => !step.hidden);
+  const deadends = steps.filter((step) => step.status === "deadend").length;
+  const shown = showAll || editing ? steps : steps.slice(0, MAX_STEPS_SHOWN);
+  const editList = Object.values(edits);
+
+  function editOf(step: Step): StepEdit {
+    return edits[step.id] ?? { id: step.id };
+  }
+  function changeStep(step: Step, change: Partial<StepEdit>) {
+    setEdits((current) => ({ ...current, [step.id]: { ...editOf(step), ...change } }));
+  }
+  function stopEditing() {
+    setEditing(false);
+    setEdits({});
+    setSaveError(null);
+  }
+  async function save() {
+    if (!onRerender) return;
+    setSaving(true);
+    setSaveError(null);
+    const problem = await onRerender(editList);
+    setSaving(false);
+    if (problem) setSaveError(problem);
+    else stopEditing();
+  }
+
+  return (
+    <section className={styles.panel} aria-labelledby="steps-title">
+      <div className={styles.panelHeader}>
+        <h2 id="steps-title" className={styles.panelTitle}>
+          Steps
+        </h2>
+        {onRerender && steps.length > 0 && !editing && (
+          <button type="button" className={styles.secondaryLink} onClick={() => setEditing(true)}>
+            Edit
+          </button>
+        )}
+      </div>
+      {editing && (
+        <p className={styles.findingsSummary}>
+          Hide a step or reword its line, then press Re-render. The site is not explored again; only changed lines
+          are recorded again.
+        </p>
+      )}
+      {steps.length === 0 ? (
+        <p className={styles.panelEmpty}>
+          Each step the agent took will appear here, with a picture and the reason for it.
+        </p>
+      ) : (
+        <>
+          <p className={styles.findingsSummary}>
+            {steps.length} {steps.length === 1 ? "step" : "steps"}
+            {deadends > 0 && `, ${deadends} ${deadends === 1 ? "dead end" : "dead ends"}`}
+            {onSelect && ". Click a step to watch it."}
+          </p>
+          <ol className={styles.findingsList}>
+            {shown.map((step) => {
+              const seekable = onSelect !== null && sceneStarts[step.id] !== undefined;
+              if (editing) {
+                const edit = editOf(step);
+                const hidden = edit.hidden ?? step.hidden;
+                return (
+                  <li key={step.id} className={hidden ? styles.stepHiddenCard : undefined}>
+                    <div className={styles.stepEditCard}>
+                      <div className={styles.stepEditHead}>
+                        <span className={styles.findingStep}>
+                          Step {step.index}
+                          {step.status === "deadend" && <span className={styles.stepDeadend}> Dead end</span>}
+                          {hidden && <span className={styles.stepDeadend}> Hidden</span>}
+                        </span>
+                        {step.status === "ok" && (
+                          <button
+                            type="button"
+                            className={styles.secondaryLink}
+                            onClick={() => changeStep(step, { hidden: !hidden })}
+                          >
+                            {hidden ? "Restore" : "Hide"}
+                          </button>
+                        )}
+                      </div>
+                      <span className={styles.stepAction}>{ACTION_LABELS[step.action](step)}</span>
+                      {step.status === "ok" && !hidden && (
+                        <>
+                          <label className={styles.stepEditLabel}>
+                            Narration
+                            <textarea
+                              className={styles.stepTextarea}
+                              rows={2}
+                              maxLength={500}
+                              value={edit.narration ?? step.narration ?? ""}
+                              onChange={(event) => changeStep(step, { narration: event.target.value })}
+                            />
+                          </label>
+                          <label className={styles.stepEditLabel}>
+                            Caption
+                            <input
+                              className={styles.input}
+                              maxLength={200}
+                              value={edit.caption ?? step.caption ?? ""}
+                              onChange={(event) => changeStep(step, { caption: event.target.value })}
+                            />
+                          </label>
+                        </>
+                      )}
+                    </div>
+                  </li>
+                );
+              }
+              return (
+                <li key={step.id}>
+                  <button
+                    type="button"
+                    className={styles.findingCard}
+                    onClick={seekable ? () => onSelect(step) : undefined}
+                    disabled={!seekable}
+                  >
+                    <Image
+                      className={styles.findingScreenshot}
+                      src={findingScreenshotUrl(jobId, step.screenshotAfter)}
+                      alt={`Screenshot after step ${step.index}`}
+                      width={160}
+                      height={90}
+                    />
+                    <span className={styles.findingCardText}>
+                      <span className={styles.findingStep}>
+                        Step {step.index}
+                        {step.status === "deadend" && (
+                          <span className={styles.stepDeadend}> Dead end</span>
+                        )}
+                      </span>
+                      <span className={styles.stepAction}>{ACTION_LABELS[step.action](step)}</span>
+                      <span className={styles.findingDescription}>
+                        {shortReason(
+                          step.status === "deadend" && step.deadendReason?.trim()
+                            ? step.deadendReason
+                            : step.reason,
+                        )}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+          {shown.length < steps.length && (
+            <button type="button" className={styles.secondaryLink} onClick={() => setShowAll(true)}>
+              Show all {steps.length} steps
+            </button>
+          )}
+          {editing && (
+            <div className={styles.actions}>
+              <button type="button" className={styles.primary} onClick={save} disabled={saving || editList.length === 0}>
+                {saving ? "Saving..." : editList.length === 0 ? "Re-render" : `Re-render (${editList.length} ${editList.length === 1 ? "change" : "changes"})`}
+              </button>
+              <button type="button" className={styles.secondary} onClick={stopEditing} disabled={saving}>
+                Cancel
+              </button>
+            </div>
+          )}
+          {saveError && <p className={styles.error} role="alert">{saveError}</p>}
+        </>
+      )}
+    </section>
+  );
+}
+
+function WhatWeFoundPanel({
+  jobId,
+  report,
+  copied,
+  copyError,
+  onSelect,
+  onCopy,
+}: {
+  jobId: string;
+  report: JobView["findings"];
+  copied: boolean;
+  copyError: boolean;
+  onSelect: ((finding: FindingItem) => void) | null;
+  onCopy: () => void;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const findings = report?.findings ?? [];
+  const shown = showAll ? findings : findings.slice(0, MAX_FINDINGS_SHOWN);
+  const hiddenCount = findings.length - shown.length;
+  return (
+    <section className={styles.panel} aria-labelledby="findings-title">
+      {report ? (
+        <>
+          <h2 id="findings-title" className={styles.panelTitle}>
+            {report.headline}
+          </h2>
+          <p className={styles.findingsSummary}>{report.summary}</p>
+          {report.findings.length === 0 ? (
+            <p className={styles.panelEmpty}>No problems found on this route.</p>
+          ) : (
+            <div className={styles.findingsList}>
+              {shown.map((finding) => (
+                <button
+                  type="button"
+                  className={styles.findingCard}
+                  key={finding.id}
+                  onClick={onSelect ? () => onSelect(finding) : undefined}
+                  disabled={!onSelect}
+                >
+                  <Image
+                    className={styles.findingScreenshot}
+                    src={findingScreenshotUrl(jobId, finding.screenshot)}
+                    alt={`Screenshot of step ${finding.stepIndex}`}
+                    width={160}
+                    height={90}
+                  />
+                  <span className={styles.findingCardText}>
+                    <span className={styles.findingSeverity}>
+                      {SEVERITY_LABELS[finding.severity]}
+                    </span>
+                    <span className={styles.findingStep}>
+                      {finding.stepIndexes.length > 1
+                        ? `Steps ${finding.stepIndexes.join(", ")}`
+                        : `Step ${finding.stepIndex}`}
+                    </span>
+                    <span className={styles.findingDescription}>{finding.description}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+          {hiddenCount > 0 && (
+            <button type="button" className={styles.secondaryLink} onClick={() => setShowAll(true)}>
+              Show all {findings.length}
+            </button>
+          )}
+          <button
+            type="button"
+            className={`${styles.secondary} ${styles.findingsCopy}`}
+            onClick={onCopy}
+          >
+            {copied ? "Copied" : "Copy as a list"}
+          </button>
+          {copyError && <p className={styles.error} role="status">Could not copy this list.</p>}
+        </>
+      ) : (
+        <>
+          <h2 id="findings-title" className={styles.panelTitle}>What we found</h2>
+          <p className={styles.panelEmpty}>
+            What a first-time visitor struggled with will appear here.
+          </p>
+        </>
+      )}
+    </section>
+  );
+}
+
 export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView; publicBaseUrl: string | null }) {
   const router = useRouter();
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const audienceSelectId = useId();
   const [view, setView] = useState(initial);
   const [offline, setOffline] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [findingsCopied, setFindingsCopied] = useState(false);
+  const [findingsCopyError, setFindingsCopyError] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
+  const [cutAudience, setCutAudience] = useState<Audience>("investor");
+  const languageSelectId = useId();
+  const [cutLanguage, setCutLanguage] = useState<string | null>(null);
+  const [translating, setTranslating] = useState(false);
+  const [translateError, setTranslateError] = useState<string | null>(null);
+  const [format, setFormat] = useState<"16:9" | "9:16" | null>(null);
+  const [formatBusy, setFormatBusy] = useState(false);
+  const [formatError, setFormatError] = useState<string | null>(null);
+  const [cutting, setCutting] = useState(false);
+  const [cutError, setCutError] = useState<string | null>(null);
   const finished = view.job.status === "done" || view.job.status === "failed";
 
   // Poll every 2 seconds until the job is done or failed.
@@ -104,12 +627,12 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
   async function tryAgain() {
     setRetrying(true);
     setRetryError(null);
-    const { mode, url, repoUrl, goal, language } = view.job;
+    const { mode, style, audience, url, repoUrl, goal, language, sourceJobId } = view.job;
     try {
       const response = await fetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode, url, repoUrl, goal, language }),
+        body: JSON.stringify({ mode, style, audience, url, repoUrl, goal, language, sourceJobId }),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok || !body.id) throw new Error(body.error);
@@ -121,6 +644,151 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
           : "We could not start it again. Check your connection and press Try again.",
       );
       setRetrying(false);
+    }
+  }
+
+  /** Save edits and/or ask for the other format; voice and render run again without the agent. */
+  async function rerender(body: { aspect?: "16:9" | "9:16"; edits?: StepEdit[] }): Promise<string | null> {
+    try {
+      const response = await fetch(`/api/jobs/${view.job.id}/rerender`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error);
+      const fresh = await fetch(`/api/jobs/${view.job.id}`, { cache: "no-store" });
+      if (fresh.ok) setView(await fresh.json());
+      return null;
+    } catch (problem) {
+      return problem instanceof Error && problem.message
+        ? problem.message
+        : "We could not start the new video. Check your connection and try again.";
+    }
+  }
+
+  async function makeOtherFormat(aspect: "16:9" | "9:16") {
+    setFormatBusy(true);
+    setFormatError(null);
+    const problem = await rerender({ aspect });
+    setFormatBusy(false);
+    if (problem) setFormatError(problem);
+    else setFormat(aspect);
+  }
+
+  async function makeAnotherLanguage(language: string) {
+    setTranslating(true);
+    setTranslateError(null);
+    try {
+      const response = await fetch("/api/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: view.job.mode,
+          style: view.job.style,
+          audience: view.job.audience,
+          url: view.job.url,
+          repoUrl: view.job.repoUrl,
+          goal: view.job.goal,
+          language,
+          sourceJobId: view.job.id,
+        }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || !body.id) throw new Error(body.error);
+      router.push(`/jobs/${body.id}`);
+    } catch (problem) {
+      setTranslateError(
+        problem instanceof Error && problem.message
+          ? problem.message
+          : "We could not start the other language. Check your connection and try again.",
+      );
+      setTranslating(false);
+    }
+  }
+
+  async function makeAudienceCut() {
+    setCutting(true);
+    setCutError(null);
+    const availableAudiences = (Object.keys(AUDIENCES) as Audience[]).filter(
+      (audience) => audience !== view.job.audience,
+    );
+    const selectedAudience = availableAudiences.includes(cutAudience)
+      ? cutAudience
+      : availableAudiences[0] ?? "new-user";
+    try {
+      const response = await fetch("/api/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: view.job.mode,
+          style: view.job.style,
+          audience: selectedAudience,
+          url: view.job.url,
+          repoUrl: view.job.repoUrl,
+          goal: view.job.goal,
+          language: view.job.language,
+        }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || !body.id) throw new Error(body.error);
+      router.push(`/jobs/${body.id}`);
+    } catch (problem) {
+      setCutError(
+        problem instanceof Error && problem.message
+          ? problem.message
+          : "We could not make that cut. Check your connection and try again.",
+      );
+      setCutting(false);
+    }
+  }
+
+  function selectFinding(finding: FindingItem) {
+    seekToStep(finding.stepId, finding.stepIndex);
+  }
+
+  function seekToStep(stepId: string, stepIndex: number) {
+    const video = videoRef.current;
+    if (!video) return;
+
+    let sceneStart = view.sceneStarts[stepId];
+    if (sceneStart === undefined) {
+      const precedingStep = view.stepFile?.steps
+        .filter(
+          (step) =>
+            step.index < stepIndex &&
+            view.sceneStarts[step.id] !== undefined,
+        )
+        .sort((left, right) => right.index - left.index)[0];
+      sceneStart = precedingStep ? view.sceneStarts[precedingStep.id] : 0;
+    }
+
+    const seekAndPlay = () => {
+      video.currentTime = sceneStart!;
+      void video.play().catch(() => undefined);
+    };
+    if (video.readyState > 0) seekAndPlay();
+    else video.addEventListener("loadedmetadata", seekAndPlay, { once: true });
+  }
+
+  async function copyFindings() {
+    const report = view.findings;
+    if (!report) return;
+    const lines = report.findings.map(
+      (finding) =>
+        `- [${SEVERITY_LABELS[finding.severity]}] Step ${finding.stepIndex}: ${finding.description}`,
+    );
+    try {
+      await navigator.clipboard.writeText(
+        lines.length > 0
+          ? `${report.summary}\n\n${lines.join("\n")}`
+          : report.summary,
+      );
+      setFindingsCopyError(false);
+      setFindingsCopied(true);
+      window.setTimeout(() => setFindingsCopied(false), 2500);
+    } catch {
+      setFindingsCopyError(true);
     }
   }
 
@@ -149,15 +817,70 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
     );
   }
 
+  if (view.job.status === "done" && view.stepFile?.goalAchieved === false) {
+    return (
+      <div className={styles.doneLayout}>
+        <section className={`${styles.card} ${styles.videoColumn}`} aria-live="polite">
+          <h1 className={styles.pageTitle}>We could not complete this route</h1>
+          <p className={styles.lead}>
+            {view.stepFile.resultText?.trim() || "The AI visitor explored the page but could not finish the goal."}
+          </p>
+          <p className={styles.fieldNote}>
+            No video was made. The steps it tried are listed{" "}
+            {view.stepFile?.steps.length ? "beside this" : "below"}. What to try: press Try again, change
+            the goal, or use a page that opens without signing in.
+          </p>
+          {retryError && (
+            <p className={styles.error} role="alert">
+              {retryError}
+            </p>
+          )}
+          <button type="button" className={styles.primary} onClick={tryAgain} disabled={retrying}>
+            {retrying ? "Starting again..." : "Try again"}
+          </button>
+          <Link href="/" className={styles.secondaryLink}>
+            Make a different video
+          </Link>
+        </section>
+        <aside className={styles.panels}>
+          <WhatWeFoundPanel
+            jobId={view.job.id}
+            report={view.findings}
+            copied={findingsCopied}
+            copyError={findingsCopyError}
+            onSelect={null}
+            onCopy={copyFindings}
+          />
+          <StepsPanel jobId={view.job.id} stepFile={view.stepFile} sceneStarts={{}} onSelect={null} onRerender={null} />
+        </aside>
+      </div>
+    );
+  }
+
   if (view.job.status === "done") {
-    const video = view.videos.landscape ?? view.videos.vertical;
+    const hasBoth = Boolean(view.videos.landscape && view.videos.vertical);
+    const chosen = format ?? (view.videos.landscape ? "16:9" : "9:16");
+    const video = chosen === "9:16" && view.videos.vertical ? view.videos.vertical : view.videos.landscape ?? view.videos.vertical;
+    const verticalVideo = video !== null && video === view.videos.vertical;
+    const missingAspect: "16:9" | "9:16" | null = hasBoth ? null : view.videos.landscape ? "9:16" : view.videos.vertical ? "16:9" : null;
+    const otherLanguages = Object.keys(LANGUAGES).filter((code) => code !== view.job.language);
+    const selectedCutLanguage =
+      cutLanguage && otherLanguages.includes(cutLanguage) ? cutLanguage : otherLanguages[0] ?? "en";
+    const otherAudiences = (Object.keys(AUDIENCES) as Audience[]).filter(
+      (audience) => audience !== view.job.audience,
+    );
+    const selectedCutAudience = otherAudiences.includes(cutAudience)
+      ? cutAudience
+      : otherAudiences[0] ?? "new-user";
     return (
       <div className={styles.doneLayout}>
         <section className={styles.videoColumn}>
           <h1 className={styles.pageTitle}>{title}</h1>
           {video ? (
             <video
-              className={styles.video}
+              key={video}
+              ref={videoRef}
+              className={`${styles.video} ${verticalVideo ? styles.videoVertical : ""}`}
               src={video}
               controls
               playsInline
@@ -168,35 +891,152 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
           ) : (
             <p className={styles.panelEmpty}>The video file is missing. Press Make another video to try again.</p>
           )}
+          {view.stepFile?.resultText?.trim() && (
+            <p className={styles.resultText}>
+              <strong>Result:</strong> {view.stepFile.resultText.trim()}
+            </p>
+          )}
+          {(hasBoth || missingAspect) && (
+            <div className={styles.formatSwitch} role="group" aria-label="Video format">
+              {hasBoth ? (
+                (["16:9", "9:16"] as const).map((aspect) => (
+                  <button
+                    key={aspect}
+                    type="button"
+                    className={`${styles.formatButton} ${chosen === aspect ? styles.formatButtonActive : ""}`}
+                    aria-pressed={chosen === aspect}
+                    onClick={() => setFormat(aspect)}
+                  >
+                    {aspect === "16:9" ? "Landscape (16:9)" : "Vertical (9:16)"}
+                  </button>
+                ))
+              ) : (
+                <button
+                  type="button"
+                  className={styles.formatButton}
+                  onClick={() => makeOtherFormat(missingAspect!)}
+                  disabled={formatBusy}
+                >
+                  {formatBusy
+                    ? "Starting..."
+                    : missingAspect === "9:16"
+                      ? "Make the vertical (9:16) version"
+                      : "Make the landscape (16:9) version"}
+                </button>
+              )}
+              {formatError && <p className={styles.error} role="alert">{formatError}</p>}
+            </div>
+          )}
           <div className={styles.actions}>
-            {video && (
-              <a className={styles.primary} href={`${video}?download=1`} download>
-                Download video
+            {view.videos.landscape && (
+              <a className={styles.primary} href={`${view.videos.landscape}?download=1`} download>
+                {hasBoth ? "Download landscape" : "Download video"}
+              </a>
+            )}
+            {view.videos.vertical && (
+              <a className={hasBoth ? styles.secondary : styles.primary} href={`${view.videos.vertical}?download=1`} download>
+                {hasBoth ? "Download vertical" : "Download video"}
               </a>
             )}
             <button type="button" className={styles.secondary} onClick={share}>
               {copied ? "Link copied" : "Share link"}
             </button>
           </div>
+          <div className={styles.audienceCut}>
+            <label className={styles.audienceCutLabel} htmlFor={audienceSelectId}>
+              Audience
+            </label>
+            <select
+              id={audienceSelectId}
+              className={styles.input}
+              value={selectedCutAudience}
+              onChange={(event) => setCutAudience(event.target.value as Audience)}
+            >
+              {otherAudiences.map((audience) => (
+                <option key={audience} value={audience}>
+                  {AUDIENCES[audience].label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className={styles.secondary}
+              onClick={makeAudienceCut}
+              disabled={cutting}
+            >
+              {cutting ? "Making the cut..." : "Make a cut for another audience"}
+            </button>
+            {cutError && <p className={styles.error} role="alert">{cutError}</p>}
+          </div>
+          {otherLanguages.length > 0 && (
+            <div className={styles.audienceCut}>
+              <label className={styles.audienceCutLabel} htmlFor={languageSelectId}>
+                Language
+              </label>
+              <select
+                id={languageSelectId}
+                className={styles.input}
+                value={selectedCutLanguage}
+                onChange={(event) => setCutLanguage(event.target.value)}
+              >
+                {otherLanguages.map((code) => (
+                  <option key={code} value={code}>
+                    {LANGUAGES[code].label}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className={styles.secondary}
+                onClick={() => makeAnotherLanguage(selectedCutLanguage)}
+                disabled={translating}
+              >
+                {translating ? "Starting..." : "Make another language"}
+              </button>
+              <p className={styles.audienceDescription}>
+                Same steps, new narration and captions. The site is not explored again.
+              </p>
+              {translateError && <p className={styles.error} role="alert">{translateError}</p>}
+            </div>
+          )}
           <Link href="/" className={styles.secondaryLink}>
             Make another video
           </Link>
         </section>
         <aside className={styles.panels}>
-          <section className={styles.panel} aria-labelledby="steps-title">
-            <h2 id="steps-title" className={styles.panelTitle}>
-              Steps
-            </h2>
-            <p className={styles.panelEmpty}>
-              Each step the agent took will appear here, with a picture and the reason for it.
-            </p>
-          </section>
+          <WhatWeFoundPanel
+            jobId={view.job.id}
+            report={view.findings}
+            copied={findingsCopied}
+            copyError={findingsCopyError}
+            onSelect={selectFinding}
+            onCopy={copyFindings}
+          />
+          <StepsPanel
+            jobId={view.job.id}
+            stepFile={view.stepFile}
+            sceneStarts={view.sceneStarts}
+            onSelect={(step) => seekToStep(step.id, step.index)}
+            onRerender={(edits) => rerender({ edits })}
+          />
           <section className={styles.panel} aria-labelledby="cost-title">
             <h2 id="cost-title" className={styles.panelTitle}>
               Cost
             </h2>
-            <p className={styles.panelEmpty}>What this video cost to make will appear here.</p>
+            {view.cost ? (
+              <CostPanel summary={view.cost} />
+            ) : (
+              <p className={styles.panelEmpty}>What this video cost to make will appear here.</p>
+            )}
           </section>
+          {view.forecast && (
+            <section className={styles.panel} aria-labelledby="forecast-title">
+              <h2 id="forecast-title" className={styles.panelTitle}>
+                Savings forecast
+              </h2>
+              <SavingsForecast basis={view.forecast} />
+            </section>
+          )}
         </aside>
       </div>
     );
@@ -238,6 +1078,15 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
       {offline && (
         <p className={styles.fieldHint} role="status">
           We lost the connection for a moment. Still trying; your video keeps going in the meantime.
+        </p>
+      )}
+      {(view.videos.landscape || view.videos.vertical) && (
+        <p className={styles.fieldNote}>
+          The previous video is still here:{" "}
+          <a className={styles.inlineLink} href={view.videos.landscape ?? view.videos.vertical ?? "#"} target="_blank" rel="noreferrer">
+            open it
+          </a>
+          .
         </p>
       )}
       <p className={styles.fieldNote}>You can leave this page. Come back to the same link to see your video.</p>

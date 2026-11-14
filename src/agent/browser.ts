@@ -157,7 +157,12 @@ export async function extractVisibleText(page: Page): Promise<string> {
   return page.evaluate(() => {
     const body = document.body;
     if (!body) return "";
-    return body.innerText.replace(/\s+/g, " ").trim().slice(0, 8_000);
+    return body.innerText
+      .replace(/[ \t\r]+/g, " ")
+      .replace(/ ?\n ?/g, "\n")
+      .replace(/\n{2,}/g, "\n")
+      .trim()
+      .slice(0, 8_000);
   });
 }
 
@@ -268,36 +273,39 @@ export async function detectLoginWall(page: Page): Promise<boolean> {
     const contentOutsideForms = bodyCopy?.innerText.replace(/\s+/g, " ").trim() ?? "";
     const passwordOnlyPage = hasVisiblePassword && contentOutsideForms.length < 120;
 
-    return hasChallengeFrame || asksForHuman || passwordOnlyPage;
+    // Ad and contact widgets embed reCAPTCHA on ordinary pages; only a page with
+    // nothing else to read is a real robot check.
+    const challengePage = hasChallengeFrame && contentOutsideForms.length < 300;
+    return challengePage || asksForHuman || passwordOnlyPage;
   });
 
   return result;
 }
 
-/** Replace personal-looking form input with one of the explicitly fake demo values. */
-function fakeFormValue(element: InteractiveElement, suggestedText: string | null): string {
-  const hints = [
-    element.inputType,
-    element.name,
-    element.placeholder,
-    element.text,
-  ]
+const FAKE_VALUES = ["Test User", "test@example.com", "555-0100"];
+
+/**
+ * Personal fields get an obviously fake value matched to the field type.
+ * Every other field gets exactly the text the model chose (the goal's numbers,
+ * search words), so the agent never types a name into a number box.
+ */
+export function valueToType(element: InteractiveElement, suggestedText: string | null): string {
+  const hints = [element.inputType, element.name, element.placeholder, element.text]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
+  const wanted = suggestedText?.trim() ?? "";
 
-  if (/email|e-mail/.test(hints)) return "test@example.com";
-  if (/phone|telephone|mobile|tel/.test(hints)) return "555-0100";
-  if (/name/.test(hints)) return "Test User";
-
-  if (
-    suggestedText === "Test User" ||
-    suggestedText === "test@example.com" ||
-    suggestedText === "555-0100"
-  ) {
-    return suggestedText;
+  if (element.inputType === "email" || /e-?mail/.test(hints)) return "test@example.com";
+  if (element.inputType === "tel" || /\b(phone|telephone|mobile|tel)\b/.test(hints)) return "555-0100";
+  if (element.inputType === "password") return "Test-Password-1";
+  if (/\b(first|last|full|your|user)[ _-]?name\b|\bname\b(?!=)/.test(hints) && !/username|file ?name/.test(hints)) {
+    return "Test User";
   }
-  return "Test User";
+  if (/\b(address|street|city|zip|postal|company|card|cvv|ssn)\b/.test(hints)) return "Test User";
+  if (wanted) return wanted;
+  if (element.inputType === "number") return "1";
+  return FAKE_VALUES[0];
 }
 
 /** Execute one selected action using a numbered DOM tag or a safe page-level operation. */
@@ -326,10 +334,14 @@ export async function performBrowserAction(
   }
 
   if (action.action === "type") {
-    const typedText = fakeFormValue(target!, action.text);
-    await page.locator(`[data-agent-element="${target!.number}"]`).fill(typedText, {
-      timeout: 5_000,
-    });
+    const typedText = valueToType(target!, action.text);
+    const field = page.locator(`[data-agent-element="${target!.number}"]`);
+    await field.fill("", { timeout: 5_000 }).catch(() => undefined);
+    await field.fill(typedText, { timeout: 5_000 });
+    const readBack = await field.inputValue({ timeout: 2_000 }).catch(() => null);
+    if (readBack !== null && readBack.trim() !== typedText.trim()) {
+      throw new Error(`Typed "${typedText}" but the field now shows "${readBack}".`);
+    }
     return { target, typedText };
   }
 
