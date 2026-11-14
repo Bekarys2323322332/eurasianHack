@@ -16,6 +16,7 @@ import { LANGUAGES } from "../../voice/config";
 import type { JobView } from "../_lib/jobView";
 import type { Step, StepFile } from "../../shared/stepFile";
 import type { CostSummary } from "../_lib/costView";
+import { FORECAST_LIMITS, forecastMonthly, type ForecastBasis } from "../_lib/forecast";
 import { toPublicUrl } from "../../shared/publicUrl";
 import styles from "./ui.module.css";
 
@@ -68,6 +69,85 @@ function formatMoney(amount: number): string {
   if (amount >= 1) return `$${amount.toFixed(2)}`;
   if (amount >= 0.01) return `$${amount.toFixed(3)}`;
   return `$${amount.toFixed(4)}`;
+}
+
+/** Whole dollars for monthly totals, cents below $10. */
+function formatMonthly(amount: number): string {
+  if (amount >= 10) return `$${Math.round(amount).toLocaleString("en-US")}`;
+  return `$${amount.toFixed(2)}`;
+}
+
+/** Two sliders, three monthly figures and a bar chart, all from the cost log. */
+function SavingsForecast({ basis }: { basis: ForecastBasis }) {
+  const [videos, setVideos] = useState<number>(FORECAST_LIMITS.videos.default);
+  const [discount, setDiscount] = useState<number>(FORECAST_LIMITS.discount.default);
+  const videosId = useId();
+  const discountId = useId();
+  const figures = forecastMonthly(basis, videos, discount);
+  const bars = [
+    { label: "Strong model for everything", value: figures.strongUsd },
+    { label: "With routing and cache", value: figures.routedUsd },
+    { label: `With reserved capacity (${discount}% off)`, value: figures.reservedUsd },
+  ];
+  const widest = Math.max(figures.strongUsd, 0.000001);
+
+  return (
+    <div className={styles.costPanel}>
+      <label className={styles.forecastLabel} htmlFor={videosId}>
+        Videos per month: <strong>{videos.toLocaleString("en-US")}</strong>
+      </label>
+      <input
+        id={videosId}
+        type="range"
+        className={styles.forecastSlider}
+        min={FORECAST_LIMITS.videos.min}
+        max={FORECAST_LIMITS.videos.max}
+        step={10}
+        value={videos}
+        onChange={(event) => setVideos(Number(event.target.value))}
+      />
+
+      <div className={styles.forecastFigures}>
+        {bars.map((bar) => (
+          <div className={styles.costMetric} key={bar.label}>
+            <p className={styles.costAmount}>{formatMonthly(bar.value)}</p>
+            <p className={styles.costExplanation}>{bar.label}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className={styles.forecastChart} role="img" aria-label={bars.map((b) => `${b.label}: ${formatMonthly(b.value)}`).join(". ")}>
+        {bars.map((bar) => (
+          <div className={styles.forecastBar} key={bar.label}>
+            <div className={styles.forecastBarFill} style={{ width: `${Math.max(2, (bar.value / widest) * 100)}%` }} />
+          </div>
+        ))}
+      </div>
+
+      <p className={styles.forecastSentence}>
+        At {videos.toLocaleString("en-US")} videos a month you would save {formatMonthly(figures.savedUsd)} a month.
+      </p>
+
+      <label className={styles.forecastLabel} htmlFor={discountId}>
+        Reserved-capacity discount: <strong>{discount}%</strong>
+      </label>
+      <input
+        id={discountId}
+        type="range"
+        className={styles.forecastSlider}
+        min={FORECAST_LIMITS.discount.min}
+        max={FORECAST_LIMITS.discount.max}
+        step={1}
+        value={discount}
+        onChange={(event) => setDiscount(Number(event.target.value))}
+      />
+      <p className={styles.costNumberNote}>
+        The discount is an assumption you can change; it stands for buying model capacity in advance. The per-video
+        figures are the average of {basis.videosCounted} fresh {basis.videosCounted === 1 ? "run" : "runs"}:{" "}
+        {formatMoney(basis.averageCostUsd)} with routing, {formatMoney(basis.averageBaselineUsd)} on the strong model.
+      </p>
+    </div>
+  );
 }
 
 /** Show the cost summary and the model usage details for one job. */
@@ -764,6 +844,14 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
               <p className={styles.panelEmpty}>What this video cost to make will appear here.</p>
             )}
           </section>
+          {view.forecast && (
+            <section className={styles.panel} aria-labelledby="forecast-title">
+              <h2 id="forecast-title" className={styles.panelTitle}>
+                Savings forecast
+              </h2>
+              <SavingsForecast basis={view.forecast} />
+            </section>
+          )}
         </aside>
       </div>
     );
