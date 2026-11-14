@@ -101,7 +101,7 @@ function readStepFile(jobFolder: string): RenderStepFile {
  * cleared when the audio file is not on disk, so a missing voice file never
  * breaks the render.
  */
-const SFX_FILES = ["click.wav", "whoosh.wav", "key.wav", "pop.wav", "chime.wav"] as const;
+const SFX_FILES = ["click.wav", "whoosh.wav", "key.wav", "pop.wav", "chime.wav", "hit.wav", "rise.wav"] as const;
 
 function preparePublicFolder(
   jobFolder: string,

@@ -187,6 +187,14 @@ export const JobVideo: React.FC<VideoProps> = ({ stepFile, aspect, style, music,
         {/* Styles with a title card length of 0 open straight on the first step. */}
         {titleFrames > 0 ? (
           <Sequence durationInFrames={titleFrames}>
+            {sfx ? (
+              <>
+                <Audio src={staticFile("sfx/hit.wav")} volume={SFX.hit} />
+                <Sequence from={Math.max(0, titleFrames - 40)} durationInFrames={40}>
+                  <Audio src={staticFile("sfx/rise.wav")} volume={SFX.rise} />
+                </Sequence>
+              </>
+            ) : null}
             {howto ? (
               // How-to videos open with what the viewer will learn.
               <Card
@@ -248,7 +256,30 @@ export const JobVideo: React.FC<VideoProps> = ({ stepFile, aspect, style, music,
 
 /** One step: cursor glide, zoom in, click, change of picture, zoom out. */
 /** Sound effect volumes, kept under the narration. */
-const SFX = { click: 0.85, whoosh: 0.75, key: 0.6, pop: 0.6, chime: 0.9, keyEveryFrames: 3, maxKeys: 10 };
+const SFX = { click: 0.85, whoosh: 0.75, key: 0.6, pop: 0.6, chime: 0.9, hit: 0.9, rise: 0.6, keyEveryFrames: 3, maxKeys: 10 };
+
+/** Film grain and a dark band top and bottom, like a trailer. */
+const GRAIN =
+  "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0.6 0'/></filter><rect width='240' height='240' filter='url(%23n)'/></svg>\")";
+const CinemaLook: React.FC<{ strength?: number }> = ({ strength = 1 }) => (
+  <>
+    <AbsoluteFill
+      style={{
+        pointerEvents: "none",
+        backgroundImage: GRAIN,
+        backgroundSize: "240px 240px",
+        opacity: 0.07 * strength,
+        mixBlendMode: "overlay",
+      }}
+    />
+    <AbsoluteFill
+      style={{
+        pointerEvents: "none",
+        background: `linear-gradient(to bottom, rgba(0,0,0,${0.35 * strength}) 0%, rgba(0,0,0,0) 14%, rgba(0,0,0,0) 86%, rgba(0,0,0,${0.35 * strength}) 100%)`,
+      }}
+    />
+  </>
+);
 
 /** Short sounds that line up with what the viewer sees: a whoosh as the scene arrives, a click, key ticks. */
 const SceneSounds: React.FC<{ scene: Scene; hasCaption: boolean }> = ({ scene, hasCaption }) => {
@@ -458,6 +489,7 @@ const SceneView: React.FC<{
       </AbsoluteFill>
 
       <Vignette strength={0.6 + 0.4 * closeness} />
+      <CinemaLook strength={0.8} />
       {sfx ? <SceneSounds scene={scene} hasCaption={Boolean(step.caption)} /> : null}
       {step.audioFile ? <Audio src={staticFile(step.audioFile)} /> : null}
       {plan.typing && step.typedText ? (
@@ -1039,10 +1071,12 @@ const Card: React.FC<{
   );
   const opacity = interpolate(frame, [0, fade, frames - fade, frames], [0, 1, 1, 0], CLAMP);
   const arrive = interpolate(frame, [0, 10], [0, 1], POP);
+  // A slow push-in over the whole card, like a film title.
+  const pushIn = 1 + 0.06 * interpolate(frame, [0, Math.max(1, frames)], [0, 1], CLAMP);
   // Bold cards land from slightly too big. Simple cards rise a little.
   const transform = bold
-    ? `scale(${1.18 - 0.18 * arrive})`
-    : `translateY(${(1 - arrive) * 24}px)`;
+    ? `scale(${(1.18 - 0.18 * arrive) * pushIn})`
+    : `translateY(${(1 - arrive) * 24}px) scale(${pushIn})`;
   const accentLine = (
     <div
       style={{
