@@ -208,10 +208,13 @@ const ACTION_LABELS: Record<Step["action"], (step: Step) => string> = {
 function StepsPanel({
   jobId,
   stepFile,
+  sceneStarts,
   onSelect,
 }: {
   jobId: string;
   stepFile: StepFile | null;
+  /** Steps that have a scene in the video; trimmed steps are not clickable. */
+  sceneStarts: Record<string, number>;
   onSelect: ((step: Step) => void) | null;
 }) {
   const [showAll, setShowAll] = useState(false);
@@ -236,7 +239,7 @@ function StepsPanel({
           </p>
           <ol className={styles.findingsList}>
             {shown.map((step) => {
-              const seekable = onSelect !== null && step.status === "ok";
+              const seekable = onSelect !== null && sceneStarts[step.id] !== undefined;
               return (
                 <li key={step.id}>
                   <button
@@ -588,7 +591,7 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
             onSelect={null}
             onCopy={copyFindings}
           />
-          <StepsPanel jobId={view.job.id} stepFile={view.stepFile} onSelect={null} />
+          <StepsPanel jobId={view.job.id} stepFile={view.stepFile} sceneStarts={{}} onSelect={null} />
         </aside>
       </div>
     );
@@ -678,6 +681,7 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
           <StepsPanel
             jobId={view.job.id}
             stepFile={view.stepFile}
+            sceneStarts={view.sceneStarts}
             onSelect={(step) => seekToStep(step.id, step.index)}
           />
           <section className={styles.panel} aria-labelledby="cost-title">
