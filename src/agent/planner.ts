@@ -4,6 +4,7 @@
  */
 import { z } from "zod";
 import type { Job } from "../shared/jobs";
+import type { JobMode } from "../shared/stepFile";
 import type { Page } from "playwright";
 import { extractInteractiveElements, extractVisibleText } from "./browser";
 import { callModel, type ModelResult } from "../llm";
@@ -15,6 +16,28 @@ const routePlanSchema = z.object({
 
 /** The route and title returned by the strong-tier planner. */
 export type RoutePlan = z.infer<typeof routePlanSchema>;
+
+/** Choose the step-model goal, preserving how-to requests and the full demo route. */
+export function buildStepGoal(
+  mode: JobMode,
+  requestedGoal: string | null,
+  route: string[],
+): { goal: string; requireFullRoute: boolean } {
+  const goal = requestedGoal?.trim();
+  if (mode === "demo" && !goal) {
+    return {
+      goal: `Show these things, in order:\n${route
+        .map((item, index) => `${index + 1}. ${item}`)
+        .join("\n")}`,
+      requireFullRoute: true,
+    };
+  }
+
+  return {
+    goal: goal || route[0] || "Explore the main features",
+    requireFullRoute: false,
+  };
+}
 
 /** Build a raw README URL only for a public GitHub repository URL. */
 function rawReadmeUrl(repoUrl: string | null): string | null {

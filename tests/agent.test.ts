@@ -6,6 +6,7 @@ import {
   isPrivateHost,
   performBrowserAction,
 } from "../src/agent/browser";
+import { buildStepGoal } from "../src/agent/planner";
 
 describe("browser helpers", () => {
   let browser: Browser;
@@ -168,5 +169,21 @@ describe("browser helpers", () => {
       </main>
     `);
     expect(await detectLoginWall(page)).toBe(false);
+  });
+});
+
+describe("step-model goal", () => {
+  it("uses the complete numbered route for a demo without a supplied goal", () => {
+    expect(buildStepGoal("demo", null, ["Open the catalog", "View an item"])).toEqual({
+      goal: "Show these things, in order:\n1. Open the catalog\n2. View an item",
+      requireFullRoute: true,
+    });
+  });
+
+  it("preserves a supplied how-to goal", () => {
+    expect(buildStepGoal("howto", "Open the top story's comments", ["Other item"])).toEqual({
+      goal: "Open the top story's comments",
+      requireFullRoute: false,
+    });
   });
 });

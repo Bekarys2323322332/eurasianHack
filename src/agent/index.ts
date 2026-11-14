@@ -35,7 +35,7 @@ import {
   type AgentAction,
   type InteractiveElement,
 } from "./browser";
-import { planRoute } from "./planner";
+import { buildStepGoal, planRoute } from "./planner";
 
 const VIEWPORT = { width: 1280, height: 720 } as const;
 const MAX_STEPS = 12;
@@ -200,7 +200,7 @@ export async function runAgent(
     }
 
     const plan = plannerResult.data;
-    const goal = job.goal?.trim() || plan.route[0] || "Explore the main features";
+    const { goal, requireFullRoute } = buildStepGoal(job.mode, job.goal, plan.route);
     const stepFile: StepFile = {
       jobId: job.id,
       mode: job.mode,
@@ -229,6 +229,9 @@ export async function runAgent(
 
       let actionResult: ModelResult<AgentAction>;
       try {
+        const completionInstruction = requireFullRoute
+          ? "For this demo, set done true only after every numbered route item has been shown, or the remaining items are clearly impossible after relevant dead ends. Until then, choose an action toward the earliest uncovered item."
+          : "Set done true only when the requested goal is complete; no action is performed when done is true.";
         actionResult = await callModel({
           tier: "small",
           system: [
@@ -237,7 +240,7 @@ export async function runAgent(
             "Choose only an action that matches the current visible element list.",
             "Use a numbered element for click and type; use null when the action targets the page itself.",
             "For form fields, type only one of these obviously fake values: Test User, test@example.com, 555-0100.",
-            "Set done true only when the requested goal is complete; no action is performed when done is true.",
+            completionInstruction,
           ].join(" "),
           user: [
             `Page URL: ${page.url()}`,
