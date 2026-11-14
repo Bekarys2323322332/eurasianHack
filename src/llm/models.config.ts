@@ -20,6 +20,30 @@ export const MODEL_PRICES: Record<string, ModelPrice> = {
     inputPerMillionUsd: 2,
     outputPerMillionUsd: 10,
   },
+  // Cheaper OpenRouter options. Small tier:
+  "deepseek/deepseek-v4.1-flash": {
+    // Discounted price at the time of writing; check OpenRouter if costs look off.
+    inputPerMillionUsd: 0.05,
+    outputPerMillionUsd: 0.2,
+  },
+  "z-ai/glm-5.3-flash": {
+    inputPerMillionUsd: 0.04,
+    outputPerMillionUsd: 0.08,
+  },
+  // Strong tier:
+  "tencent/hy4-preview": {
+    inputPerMillionUsd: 0.83,
+    outputPerMillionUsd: 2.5,
+  },
+  "stepfun/step-5-preview": {
+    inputPerMillionUsd: 1,
+    outputPerMillionUsd: 2.7,
+  },
+  "x-ai/grok-4.7": {
+    // Price for prompts under 200K tokens; the agent's prompts are far smaller.
+    inputPerMillionUsd: 2,
+    outputPerMillionUsd: 6,
+  },
 };
 
 /**
