@@ -126,7 +126,7 @@ async function runPipeline(jobId: string) {
     if (job.sourceJobId) {
       stage = "reusing the recorded steps";
       updateJob(jobId, { status: "scripting", progressMessage: "Reusing the recorded steps" });
-      stepFile = copyStepsForNewJob(getJobDir(job.sourceJobId), jobFolder, jobId);
+      stepFile = copyStepsForNewJob(getJobDir(job.sourceJobId), jobFolder, jobId, job.language);
     } else {
       stepFile = (await runAgent(job)).stepFile;
     }

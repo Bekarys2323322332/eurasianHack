@@ -432,12 +432,12 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
   async function tryAgain() {
     setRetrying(true);
     setRetryError(null);
-    const { mode, style, audience, url, repoUrl, goal, language } = view.job;
+    const { mode, style, audience, url, repoUrl, goal, language, sourceJobId } = view.job;
     try {
       const response = await fetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode, style, audience, url, repoUrl, goal, language }),
+        body: JSON.stringify({ mode, style, audience, url, repoUrl, goal, language, sourceJobId }),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok || !body.id) throw new Error(body.error);

@@ -62,9 +62,10 @@ describe("copyStepsForNewJob", () => {
     writeSource();
     const target = path.join(tempDir, "new");
 
-    const stepFile = copyStepsForNewJob(source, target, "new");
+    const stepFile = copyStepsForNewJob(source, target, "new", "ru");
 
     expect(stepFile.jobId).toBe("new");
+    expect(stepFile.language).toBe("ru");
     expect(stepFile.steps[0]).toMatchObject({
       narration: null,
       caption: null,

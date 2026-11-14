@@ -26,11 +26,17 @@ export function readReusableStepFile(sourceFolder: string): StepFile {
 }
 
 /** Copy steps and screenshots into a new job folder, ready for script, voice and render. */
-export function copyStepsForNewJob(sourceFolder: string, targetFolder: string, jobId: string): StepFile {
+export function copyStepsForNewJob(
+  sourceFolder: string,
+  targetFolder: string,
+  jobId: string,
+  language: string,
+): StepFile {
   const source = readReusableStepFile(sourceFolder);
   const stepFile: StepFile = {
     ...source,
     jobId,
+    language,
     steps: source.steps.map((step) => ({
       ...step,
       narration: null,

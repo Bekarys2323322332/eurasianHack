@@ -5,7 +5,7 @@
  * Reply: 201 { id } or 400 { error } with a plain sentence for the form.
  */
 import { z } from "zod";
-import { createJob, getJob, getJobDir } from "../../../shared/jobs";
+import { createJob, getJob, getJobDir, type Job } from "../../../shared/jobs";
 import { JOB_MODES } from "../../../shared/stepFile";
 import { LANGUAGES } from "../../../voice/config";
 import { enqueueJob, isQueueFull } from "../../_lib/pipeline";
@@ -90,6 +90,7 @@ export async function POST(request: Request) {
   }
 
   const sourceJobId = parsed.data.sourceJobId || null;
+  let recording: Job | null = null;
   if (sourceJobId) {
     const source = getJob(sourceJobId);
     if (!source || source.status !== "done") {
@@ -105,6 +106,7 @@ export async function POST(request: Request) {
         error instanceof ReuseStepsError ? error.message : "The original video's steps could not be read.";
       return Response.json({ error: message }, { status: 400 });
     }
+    recording = source;
   }
 
   if (isQueueFull()) {
@@ -114,13 +116,14 @@ export async function POST(request: Request) {
     );
   }
 
+  // A reused recording keeps the inputs it was made with; only the language, style and audience change.
   const job = createJob({
-    mode,
+    mode: recording?.mode ?? mode,
     style: parsed.data.style,
     audience: parsed.data.audience,
-    url: new URL(url).toString(),
-    repoUrl,
-    goal,
+    url: recording?.url ?? new URL(url).toString(),
+    repoUrl: recording ? recording.repoUrl : repoUrl,
+    goal: recording ? recording.goal : goal,
     language,
     sourceJobId,
   });
