@@ -9,6 +9,7 @@
 import { getJob, getJobDir, listJobs, updateJob, type Job } from "../../shared/jobs";
 import { LANGUAGES } from "../../voice/config";
 import { copyStepsForNewJob } from "./reuseSteps";
+import { clearRerenderMarker, readRerenderMarker } from "./rerender";
 import type { StepFile } from "../../shared/stepFile";
 import {
   appendCostCall,
@@ -115,6 +116,46 @@ async function writeFindingsSafely(jobId: string, jobFolder: string, languageNam
   }
 }
 
+type Aspect = "16:9" | "9:16";
+
+/** Voice and render, shared by fresh jobs and re-renders. Returns the stage name on failure. */
+async function recordVoiceAndRender(job: Job, aspect: Aspect, setStage: (stage: string) => void) {
+  const jobId = job.id;
+  const jobFolder = getJobDir(jobId);
+  setStage("recording the voice");
+  updateJob(jobId, { status: "voicing", progressMessage: "Recording the voice" });
+  const voiceSummary = await generateVoice(jobFolder, { language: job.language });
+  appendCostCall(jobFolder, "voice", {
+    model: PROVIDER_NAME,
+    inputTokens: 0,
+    outputTokens: 0,
+    costUsd: voiceSummary.totalCost,
+    cacheHit: voiceSummary.generated === 0 && voiceSummary.cached > 0,
+  });
+  if (voiceSummary.failed > 0) {
+    console.warn(
+      `Voice generation failed for ${voiceSummary.failed} step(s); the renderer will use silent audio for them.`,
+      voiceSummary.failures,
+    );
+  }
+
+  setStage("building the video");
+  updateJob(jobId, { status: "rendering", progressMessage: "Building the video" });
+  let lastPercent = -1;
+  await renderJob(jobFolder, { aspect, music: true, style: job.style }, (percent) => {
+    // Write at most every 5 percent so the database is not flooded.
+    if (percent >= lastPercent + 5 || percent === 100) {
+      lastPercent = percent;
+      updateJob(jobId, { progressMessage: `Building the video (${percent}% done)` });
+    }
+  });
+}
+
+/** The format a job renders in unless a re-render asks for the other one. */
+function defaultAspect(job: Job): Aspect {
+  return job.style === "social" ? "9:16" : "16:9";
+}
+
 async function runPipeline(jobId: string) {
   const job = getJob(jobId);
   if (!job) return;
@@ -122,6 +163,21 @@ async function runPipeline(jobId: string) {
   try {
     const jobFolder = getJobDir(jobId);
     const languageName = LANGUAGES[job.language]?.label ?? "English";
+
+    const rerender = readRerenderMarker(jobFolder);
+    if (rerender) {
+      stage = "recording the voice";
+      try {
+        await recordVoiceAndRender(job, rerender.aspect ?? defaultAspect(job), (name) => {
+          stage = name;
+        });
+      } finally {
+        clearRerenderMarker(jobFolder);
+      }
+      updateJob(jobId, { status: "done", progressMessage: "Your video is ready" });
+      return;
+    }
+
     let stepFile: StepFile;
     if (job.sourceJobId) {
       stage = "reusing the recorded steps";
@@ -157,41 +213,9 @@ async function runPipeline(jobId: string) {
     stage = "writing up what we found";
     if (!job.sourceJobId) await writeFindingsSafely(jobId, jobFolder, languageName);
 
-    stage = "recording the voice";
-    updateJob(jobId, { status: "voicing", progressMessage: "Recording the voice" });
-    const voiceSummary = await generateVoice(jobFolder, { language: job.language });
-    appendCostCall(jobFolder, "voice", {
-      model: PROVIDER_NAME,
-      inputTokens: 0,
-      outputTokens: 0,
-      costUsd: voiceSummary.totalCost,
-      cacheHit: voiceSummary.generated === 0 && voiceSummary.cached > 0,
+    await recordVoiceAndRender(job, defaultAspect(job), (name) => {
+      stage = name;
     });
-    if (voiceSummary.failed > 0) {
-      console.warn(
-        `Voice generation failed for ${voiceSummary.failed} step(s); the renderer will use silent audio for them.`,
-        voiceSummary.failures,
-      );
-    }
-
-    stage = "building the video";
-    updateJob(jobId, { status: "rendering", progressMessage: "Building the video" });
-    let lastPercent = -1;
-    await renderJob(
-      getJobDir(jobId),
-      {
-        aspect: job.style === "social" ? "9:16" : "16:9",
-        music: true,
-        style: job.style,
-      },
-      (percent) => {
-        // Write at most every 5 percent so the database is not flooded.
-        if (percent >= lastPercent + 5 || percent === 100) {
-          lastPercent = percent;
-          updateJob(jobId, { progressMessage: `Building the video (${percent}% done)` });
-        }
-      },
-    );
 
     updateJob(jobId, { status: "done", progressMessage: "Your video is ready" });
   } catch (error) {
