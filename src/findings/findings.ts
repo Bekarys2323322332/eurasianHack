@@ -296,7 +296,7 @@ export async function writeFindings(
       system: [
         `Write directly in ${options.languageName}.`,
         "You explain usability problems to a non-technical product owner.",
-        "For each finding write one plain sentence saying what a first-time visitor would have noticed, naming the button, field or page involved. No technical words like HTTP, console, DOM or request.",
+        "For each finding write one plain sentence saying what a first-time visitor would have noticed, naming the button, field or page involved. Rephrase whatHappened in your own words instead of copying it. No technical words like HTTP, console, DOM or request.",
         "If a finding happened several times, say so in the same sentence.",
         "Write the summary as one short paragraph shaped like: A first-time visitor could do X easily but struggled with Y.",
         "Keep each description to 25 words and the summary to 60 words.",
