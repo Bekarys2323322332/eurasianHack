@@ -7,12 +7,15 @@ import Link from "next/link";
 import JobForm from "./_components/JobForm";
 import styles from "./_components/ui.module.css";
 import { getJobView } from "./_lib/jobView";
+import { resumePendingJobs } from "./_lib/pipeline";
 import { listJobs } from "../shared/jobs";
 
 export const dynamic = "force-dynamic";
 
 /** The newest finished videos that have a picture to show. */
 function galleryItems() {
+  // Opening the home page after a restart also restarts any waiting jobs.
+  resumePendingJobs();
   return listJobs({ status: "done", limit: 12 })
     .map((job) => getJobView(job.id))
     .filter((view) => view !== null && view.videos.landscape !== null)
