@@ -94,7 +94,8 @@ function scriptCachePath(
     stepFile.goal,
     options.languageName,
     options.style,
-    visibleSteps.map(({ id, action, target, reason }) => ({ id, action, target, reason })),
+    stepFile.resultText ?? null,
+    visibleSteps.map(({ id, action, target, reason, typedText, observed }) => ({ id, action, target, reason, typedText, observed })),
   ]);
   const digest = createHash("sha256").update(key).digest("hex");
   const dataDir = path.resolve(process.env.DATA_DIR || "./data");
@@ -220,6 +221,10 @@ export async function writeScript(
       `Write directly in ${options.languageName}; do not translate from English.`,
       "Return the required JSON fields: lines, and for every line the exact stepId, narration, and caption properties. Copy each stepId exactly from the input.",
       "Write exactly one natural spoken sentence of narration and one short caption for each visible step.",
+      "Narrate what actually happened: mention the real typed text and the observed result, never an invented value.",
+      stepFile.resultText && stepFile.goalAchieved !== false
+        ? `The last line must state the result: ${stepFile.resultText}`
+        : "",
       `Narration must be at most ${options.style === "social" ? 8 : 18} words; captions must be at most 6 words.`,
       STYLE_TONES[options.style],
       stepFile.mode === "howto"
@@ -232,10 +237,18 @@ export async function writeScript(
       `Video goal: ${stepFile.goal}`,
       `Language: ${options.languageName}`,
       `Visible steps:\n${JSON.stringify(
-        visibleSteps.map(({ id, action, target, reason }) => ({ id, action, target, reason })),
+        visibleSteps.map(({ id, action, target, reason, typedText, observed }) => ({
+          id,
+          action,
+          target,
+          reason,
+          typedText,
+          observed: observed ?? undefined,
+        })),
         null,
         2,
       )}`,
+      stepFile.resultText ? `Final result reached: ${stepFile.resultText}` : "",
       `Required JSON output shape; copy each stepId exactly and replace the text placeholders:\n${JSON.stringify(outputShape, null, 2)}`,
     ].join("\n\n"),
     json: schema,
