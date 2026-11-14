@@ -98,9 +98,11 @@ export async function renderJobStub(
 
   // ffmpeg's concat demuxer reads a list of images with a duration for each.
   const listFile = path.join(jobFolder, "slideshow.txt");
-  const lines = shots.flatMap((shot) => [`file '${path.resolve(jobFolder, shot)}'`, "duration 1.5"]);
+  // Paths are single-quoted in the list, so a quote inside a path is written as '\''.
+  const quote = (shot: string) => `'${path.resolve(jobFolder, shot).replace(/'/g, "'\\''")}'`;
+  const lines = shots.flatMap((shot) => [`file ${quote(shot)}`, "duration 1.5"]);
   // The last image must be listed twice or its duration is ignored.
-  lines.push(`file '${path.resolve(jobFolder, shots[shots.length - 1])}'`);
+  lines.push(`file ${quote(shots[shots.length - 1])}`);
   fs.writeFileSync(listFile, lines.join("\n"));
 
   const vertical = options.aspect === "9:16";
