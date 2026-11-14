@@ -142,6 +142,13 @@ Other commands:
 | `npm run dev` | Start the app in development mode |
 | `python3 scripts/make-fake-job.py` | Regenerate the fake job (needs Pillow) |
 
+## Run the agent alone
+
+After setting the four required model variables in `.env`, run
+`npm run agent -- --url https://example.com --goal "Explore the main page"`.
+Use `--mode demo --repo https://github.com/owner/repo` to include repository
+README context.
+
 ## Optional: Docker deployment
 
 The included Dockerfile packages Chromium and ffmpeg. Use a host that runs
