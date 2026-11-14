@@ -45,6 +45,8 @@ export type VideoProps = {
   style: Style;
   /** True when a music file was found and the caller wants music. */
   music: boolean;
+  /** Play click, whoosh and key sounds (public/sfx). */
+  sfx?: boolean;
 };
 
 /**

@@ -156,7 +156,7 @@ function makeLayout(stepFile: StepFile, aspect: Aspect, settings: Settings): Lay
 }
 
 /** The whole video: title card, one scene per visible step, end card. */
-export const JobVideo: React.FC<VideoProps> = ({ stepFile, aspect, style, music }) => {
+export const JobVideo: React.FC<VideoProps> = ({ stepFile, aspect, style, music, sfx = false }) => {
   const settings = settingsFor(style);
   const timeline = useMemo(() => buildTimeline(stepFile, settings), [stepFile, settings]);
   const layout = useMemo(
@@ -187,6 +187,14 @@ export const JobVideo: React.FC<VideoProps> = ({ stepFile, aspect, style, music 
         {/* Styles with a title card length of 0 open straight on the first step. */}
         {titleFrames > 0 ? (
           <Sequence durationInFrames={titleFrames}>
+            {sfx ? (
+              <>
+                <Audio src={staticFile("sfx/hit.wav")} volume={SFX.hit} />
+                <Sequence from={Math.max(0, titleFrames - 40)} durationInFrames={40}>
+                  <Audio src={staticFile("sfx/rise.wav")} volume={SFX.rise} />
+                </Sequence>
+              </>
+            ) : null}
             {howto ? (
               // How-to videos open with what the viewer will learn.
               <Card
@@ -214,12 +222,13 @@ export const JobVideo: React.FC<VideoProps> = ({ stepFile, aspect, style, music 
           // Inside a Sequence, useCurrentFrame() starts again from 0, so each
           // scene can think in "frames since my own start".
           <Sequence key={scene.step.id} from={scene.from} durationInFrames={scene.frames}>
-            <SceneView scene={scene} layout={layout} aspect={aspect} address={address} />
+            <SceneView scene={scene} layout={layout} aspect={aspect} address={address} sfx={sfx} />
             {howto ? <Badge number={scene.number} total={scenes.length} aspect={aspect} /> : null}
           </Sequence>
         ))}
 
         <Sequence from={endFrom} durationInFrames={endFrames}>
+          {sfx ? <Audio src={staticFile("sfx/chime.wav")} volume={SFX.chime} /> : null}
           {howto ? (
             <RecapCard
               heading={howToTitle}
@@ -246,12 +255,87 @@ export const JobVideo: React.FC<VideoProps> = ({ stepFile, aspect, style, music 
 };
 
 /** One step: cursor glide, zoom in, click, change of picture, zoom out. */
+/** Sound effect volumes, kept under the narration. */
+const SFX = { click: 0.85, whoosh: 0.75, key: 0.6, pop: 0.6, chime: 0.9, hit: 0.9, rise: 0.6, keyEveryFrames: 3, maxKeys: 10 };
+
+/** Film grain and a dark band top and bottom, like a trailer. */
+const GRAIN =
+  "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0.6 0'/></filter><rect width='240' height='240' filter='url(%23n)'/></svg>\")";
+const CinemaLook: React.FC<{ strength?: number }> = ({ strength = 1 }) => (
+  <>
+    <AbsoluteFill
+      style={{
+        pointerEvents: "none",
+        backgroundImage: GRAIN,
+        backgroundSize: "240px 240px",
+        opacity: 0.07 * strength,
+        mixBlendMode: "overlay",
+      }}
+    />
+    <AbsoluteFill
+      style={{
+        pointerEvents: "none",
+        background: `linear-gradient(to bottom, rgba(0,0,0,${0.35 * strength}) 0%, rgba(0,0,0,0) 14%, rgba(0,0,0,0) 86%, rgba(0,0,0,${0.35 * strength}) 100%)`,
+      }}
+    />
+  </>
+);
+
+/** Short sounds that line up with what the viewer sees: a whoosh as the scene arrives, a click, key ticks. */
+const SceneSounds: React.FC<{ scene: Scene; hasCaption: boolean }> = ({ scene, hasCaption }) => {
+  const { plan } = scene;
+  const popAt = Math.min(4, Math.max(0, scene.frames - 2));
+  const keys: number[] = [];
+  if (plan.typing) {
+    for (let at = plan.typing.start; at < plan.typing.end && keys.length < SFX.maxKeys; at += SFX.keyEveryFrames) {
+      keys.push(at);
+    }
+  }
+  return (
+    <>
+      {scene.from > 0 ? (
+        <Sequence from={0} durationInFrames={Math.min(scene.frames, 20)}>
+          <Audio src={staticFile("sfx/whoosh.wav")} volume={SFX.whoosh} />
+        </Sequence>
+      ) : null}
+      {hasCaption && scene.frames > 6 ? (
+        <Sequence from={popAt} durationInFrames={Math.min(scene.frames - popAt, 8)}>
+          <Audio src={staticFile("sfx/pop.wav")} volume={SFX.pop} />
+        </Sequence>
+      ) : null}
+      {plan.rippleAt !== null && plan.rippleAt < scene.frames - 1 ? (
+        <Sequence from={plan.rippleAt} durationInFrames={Math.min(scene.frames - plan.rippleAt, 6)}>
+          <Audio src={staticFile("sfx/click.wav")} volume={SFX.click} />
+        </Sequence>
+      ) : null}
+      {keys.map((at) =>
+        at < scene.frames - 1 ? (
+          <Sequence key={at} from={at} durationInFrames={Math.min(scene.frames - at, 3)}>
+            <Audio src={staticFile("sfx/key.wav")} volume={SFX.key} />
+          </Sequence>
+        ) : null,
+      )}
+    </>
+  );
+};
+
+/** A soft dark edge that draws the eye to the middle of the picture. */
+const Vignette: React.FC<{ strength: number }> = ({ strength }) => (
+  <AbsoluteFill
+    style={{
+      pointerEvents: "none",
+      background: `radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,${0.45 * strength}) 100%)`,
+    }}
+  />
+);
+
 const SceneView: React.FC<{
   scene: Scene;
   layout: Layout;
   aspect: Aspect;
   address: string;
-}> = ({ scene, layout, aspect, address }) => {
+  sfx: boolean;
+}> = ({ scene, layout, aspect, address, sfx }) => {
   const frame = useCurrentFrame();
   const settings = useSettings();
   const { step, plan } = scene;
@@ -404,6 +488,9 @@ const SceneView: React.FC<{
         </AbsoluteFill>
       </AbsoluteFill>
 
+      <Vignette strength={0.6 + 0.4 * closeness} />
+      <CinemaLook strength={0.8} />
+      {sfx ? <SceneSounds scene={scene} hasCaption={Boolean(step.caption)} /> : null}
       {step.audioFile ? <Audio src={staticFile(step.audioFile)} /> : null}
       {plan.typing && step.typedText ? (
         <TypingChip text={step.typedText} typing={plan.typing} aspect={aspect} />
@@ -984,10 +1071,12 @@ const Card: React.FC<{
   );
   const opacity = interpolate(frame, [0, fade, frames - fade, frames], [0, 1, 1, 0], CLAMP);
   const arrive = interpolate(frame, [0, 10], [0, 1], POP);
+  // A slow push-in over the whole card, like a film title.
+  const pushIn = 1 + 0.06 * interpolate(frame, [0, Math.max(1, frames)], [0, 1], CLAMP);
   // Bold cards land from slightly too big. Simple cards rise a little.
   const transform = bold
-    ? `scale(${1.18 - 0.18 * arrive})`
-    : `translateY(${(1 - arrive) * 24}px)`;
+    ? `scale(${(1.18 - 0.18 * arrive) * pushIn})`
+    : `translateY(${(1 - arrive) * 24}px) scale(${pushIn})`;
   const accentLine = (
     <div
       style={{
