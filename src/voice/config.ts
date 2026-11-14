@@ -10,6 +10,16 @@
  * model is multilingual, so the same voices work for every language; the
  * language of the speech follows the language of the text.
  */
+/** The speech model used for every line. Handles English and Russian. */
+export const MODEL = "elevenlabs/eleven-multilingual-v2";
+
+/**
+ * What the model above costs, in US dollars per character of text sent to
+ * it (80 dollars per million characters on OpenRouter). The voice cost of a
+ * job is worked out from this, so change it together with MODEL.
+ */
+export const PRICE_PER_CHARACTER_USD = 0.00008;
+
 export interface LanguageConfig {
   /** Shown to people, e.g. in a language picker. */
   label: string;
