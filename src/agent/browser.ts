@@ -119,11 +119,28 @@ export function isPrivateHost(hostname: string): boolean {
   return false;
 }
 
+/** Resolve hostnames and reject any private DNS answer, failing closed on lookup errors. */
+export async function resolvesToPrivate(
+  hostname: string,
+  lookupFn: (host: string, opts: { all: true }) => Promise<{ address: string }[]> = lookup,
+): Promise<boolean> {
+  const normalized = normalizeHostname(hostname);
+  if (isPrivateHost(normalized)) return true;
+  if (isIP(normalized.split("%", 1)[0]) !== 0) return false;
+
+  try {
+    const addresses = await lookupFn(normalized, { all: true });
+    return addresses.some(({ address }) => isPrivateHost(address));
+  } catch {
+    return true;
+  }
+}
+
 /**
  * Reject private URL hosts and DNS answers before the browser starts.
- * DNS is checked only once; a DNS-rebinding change between this check and a
- * later request is accepted for now, while the browser route still blocks
- * private IP literals on every request.
+ * Each request hostname is resolved once per run and cached by the route
+ * handler. Rebinding between that lookup and Chromium's own DNS lookup remains
+ * an accepted limitation.
  */
 export async function assertPublicUrl(url: string): Promise<void> {
   const parsedUrl = new URL(url);
@@ -132,15 +149,7 @@ export async function assertPublicUrl(url: string): Promise<void> {
   }
 
   const hostname = normalizeHostname(parsedUrl.hostname);
-  if (isPrivateHost(hostname)) {
-    throw new Error(PRIVATE_ADDRESS_MESSAGE);
-  }
-
-  if (isIP(hostname) !== 0) return;
-  const addresses = await lookup(hostname, { all: true });
-  if (addresses.some(({ address }) => isPrivateHost(address))) {
-    throw new Error(PRIVATE_ADDRESS_MESSAGE);
-  }
+  if (await resolvesToPrivate(hostname)) throw new Error(PRIVATE_ADDRESS_MESSAGE);
 }
 
 /** Collect visible page copy while excluding common hidden or non-content nodes. */
