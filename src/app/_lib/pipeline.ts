@@ -215,7 +215,7 @@ async function runPipeline(jobId: string) {
     });
 
     stage = "writing up what we found";
-    if (!job.sourceJobId) await writeFindingsSafely(jobId, jobFolder, languageName);
+    await writeFindingsSafely(jobId, jobFolder, languageName);
 
     await recordVoiceAndRender(job, defaultAspect(job), (name) => {
       stage = name;

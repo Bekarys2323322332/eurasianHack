@@ -58,7 +58,7 @@ afterEach(() => {
 });
 
 describe("copyStepsForNewJob", () => {
-  it("copies steps, screenshots and findings, and clears narration and audio", () => {
+  it("copies steps and screenshots, clears narration and audio, and leaves findings to be rewritten", () => {
     writeSource();
     const target = path.join(tempDir, "new");
 
@@ -74,7 +74,7 @@ describe("copyStepsForNewJob", () => {
       reason: "Open the home page",
     });
     expect(fs.readFileSync(path.join(target, "steps", "s1-after.png"), "utf8")).toBe("after");
-    expect(fs.existsSync(path.join(target, "findings.json"))).toBe(true);
+    expect(fs.existsSync(path.join(target, "findings.json"))).toBe(false);
     expect(JSON.parse(fs.readFileSync(path.join(target, "steps.json"), "utf8")).jobId).toBe("new");
   });
 
