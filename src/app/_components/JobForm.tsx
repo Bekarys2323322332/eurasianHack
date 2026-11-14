@@ -8,6 +8,7 @@
  */
 import { useRouter } from "next/navigation";
 import { useId, useState, type FormEvent } from "react";
+import { AUDIENCES, DEFAULT_AUDIENCE, type Audience } from "../../shared/audiences";
 import { defaultStyle, type Style } from "../../renderer/settings";
 import { LANGUAGES } from "../../voice/config";
 import styles from "./ui.module.css";
@@ -54,6 +55,7 @@ export default function JobForm() {
   };
   const [mode, setMode] = useState<Mode>("demo");
   const [styleOverride, setStyleOverride] = useState<Style | null>(null);
+  const [audience, setAudience] = useState<Audience>(DEFAULT_AUDIENCE);
   const [url, setUrl] = useState("");
   const [repoUrl, setRepoUrl] = useState("");
   const [goal, setGoal] = useState("");
@@ -94,6 +96,7 @@ export default function JobForm() {
           goal: mode === "howto" ? goal.trim() : null,
           language,
           style,
+          audience,
         }),
       });
       const body = await response.json().catch(() => ({}));
@@ -134,6 +137,30 @@ export default function JobForm() {
             <span className={styles.modeText}>{description}</span>
           </label>
         ))}
+      </fieldset>
+
+      <fieldset className={styles.modes}>
+        <legend className={styles.label}>Who is this for?</legend>
+        {(Object.keys(AUDIENCES) as Audience[]).map((value) => {
+          const option = AUDIENCES[value];
+          return (
+            <label
+              key={value}
+              className={`${styles.mode} ${audience === value ? styles.modeActive : ""}`}
+            >
+              <input
+                type="radio"
+                name="audience"
+                value={value}
+                checked={audience === value}
+                onChange={() => setAudience(value)}
+                className={styles.srOnly}
+              />
+              <span className={styles.modeTitle}>{option.label}</span>
+              <span className={styles.audienceDescription}>{option.description}</span>
+            </label>
+          );
+        })}
       </fieldset>
 
       <label htmlFor={ids.url} className={styles.label}>

@@ -14,6 +14,7 @@ import {
   PROVIDER_NAME,
   renderJob,
   runAgent,
+  writeFindings,
   writeScript,
 } from "./stages";
 
@@ -101,20 +102,38 @@ function plainFailure(stage: string, error: unknown): string {
 }
 
 /** Run every stage for one job and keep its status up to date. */
+/** Findings are a bonus: a failure here is logged and never fails the job. */
+async function writeFindingsSafely(jobId: string, jobFolder: string, languageName: string) {
+  try {
+    updateJob(jobId, { status: "scripting", progressMessage: "Writing up what we found" });
+    const findingsCall = await writeFindings(jobFolder, { languageName });
+    if (findingsCall) appendCostCall(jobFolder, "findings", findingsCall);
+  } catch (error) {
+    console.warn(`Could not write findings for job ${jobId}; continuing without them.`, error);
+  }
+}
+
 async function runPipeline(jobId: string) {
   const job = getJob(jobId);
   if (!job) return;
   let stage = "exploring the site";
   try {
-    await runAgent(job);
+    const { stepFile } = await runAgent(job);
+    const jobFolder = getJobDir(jobId);
+    const languageName = LANGUAGES[job.language]?.label ?? "English";
+
+    if (stepFile.goalAchieved === false) {
+      await writeFindingsSafely(jobId, jobFolder, languageName);
+      updateJob(jobId, {
+        status: "done",
+        progressMessage: stepFile.resultText?.trim() || "The agent could not finish this route.",
+      });
+      return;
+    }
 
     stage = "writing the script";
     updateJob(jobId, { status: "scripting", progressMessage: "Writing the script" });
-    const jobFolder = getJobDir(jobId);
-    const scriptCall = await writeScript(jobFolder, {
-      languageName: LANGUAGES[job.language]?.label ?? "English",
-      style: job.style,
-    });
+    const scriptCall = await writeScript(jobFolder, { languageName, style: job.style });
     appendCostCall(jobFolder, "script", {
       model: scriptCall.model,
       inputTokens: scriptCall.inputTokens,
@@ -125,6 +144,9 @@ async function runPipeline(jobId: string) {
       cacheHit: scriptCall.cacheHit,
       baselineCostUsd: scriptCall.baselineCostUsd,
     });
+
+    stage = "writing up what we found";
+    await writeFindingsSafely(jobId, jobFolder, languageName);
 
     stage = "recording the voice";
     updateJob(jobId, { status: "voicing", progressMessage: "Recording the voice" });

@@ -8,8 +8,10 @@
  * back to it later.
  */
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useId, useRef, useState } from "react";
+import { AUDIENCES, type Audience } from "../../shared/audiences";
 import type { JobView } from "../_lib/jobView";
 import type { CostSummary } from "../_lib/costView";
 import { toPublicUrl } from "../../shared/publicUrl";
@@ -171,13 +173,122 @@ function CostPanel({ summary }: { summary: CostSummary }) {
   );
 }
 
+type FindingItem = NonNullable<JobView["findings"]>["findings"][number];
+
+const MAX_FINDINGS_SHOWN = 5;
+
+const SEVERITY_LABELS = {
+  high: "Serious",
+  medium: "Worth fixing",
+  low: "Minor",
+} as const;
+
+function findingScreenshotUrl(jobId: string, screenshot: string): string {
+  const encodedPath = screenshot.split("/").map(encodeURIComponent).join("/");
+  return `/api/jobs/${jobId}/files/${encodedPath}`;
+}
+
+function WhatWeFoundPanel({
+  jobId,
+  report,
+  copied,
+  copyError,
+  onSelect,
+  onCopy,
+}: {
+  jobId: string;
+  report: JobView["findings"];
+  copied: boolean;
+  copyError: boolean;
+  onSelect: ((finding: FindingItem) => void) | null;
+  onCopy: () => void;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const findings = report?.findings ?? [];
+  const shown = showAll ? findings : findings.slice(0, MAX_FINDINGS_SHOWN);
+  const hiddenCount = findings.length - shown.length;
+  return (
+    <section className={styles.panel} aria-labelledby="findings-title">
+      {report ? (
+        <>
+          <h2 id="findings-title" className={styles.panelTitle}>
+            {report.headline}
+          </h2>
+          <p className={styles.findingsSummary}>{report.summary}</p>
+          {report.findings.length === 0 ? (
+            <p className={styles.panelEmpty}>No problems found on this route.</p>
+          ) : (
+            <div className={styles.findingsList}>
+              {shown.map((finding) => (
+                <button
+                  type="button"
+                  className={styles.findingCard}
+                  key={finding.id}
+                  onClick={onSelect ? () => onSelect(finding) : undefined}
+                  disabled={!onSelect}
+                >
+                  <Image
+                    className={styles.findingScreenshot}
+                    src={findingScreenshotUrl(jobId, finding.screenshot)}
+                    alt={`Screenshot of step ${finding.stepIndex}`}
+                    width={160}
+                    height={90}
+                  />
+                  <span className={styles.findingCardText}>
+                    <span className={styles.findingSeverity}>
+                      {SEVERITY_LABELS[finding.severity]}
+                    </span>
+                    <span className={styles.findingStep}>
+                      {finding.stepIndexes.length > 1
+                        ? `Steps ${finding.stepIndexes.join(", ")}`
+                        : `Step ${finding.stepIndex}`}
+                    </span>
+                    <span className={styles.findingDescription}>{finding.description}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+          {hiddenCount > 0 && (
+            <button type="button" className={styles.secondaryLink} onClick={() => setShowAll(true)}>
+              Show all {findings.length}
+            </button>
+          )}
+          <button
+            type="button"
+            className={`${styles.secondary} ${styles.findingsCopy}`}
+            onClick={onCopy}
+          >
+            {copied ? "Copied" : "Copy as a list"}
+          </button>
+          {copyError && <p className={styles.error} role="status">Could not copy this list.</p>}
+        </>
+      ) : (
+        <>
+          <h2 id="findings-title" className={styles.panelTitle}>What we found</h2>
+          <p className={styles.panelEmpty}>
+            What a first-time visitor struggled with will appear here.
+          </p>
+        </>
+      )}
+    </section>
+  );
+}
+
 export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView; publicBaseUrl: string | null }) {
   const router = useRouter();
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const audienceSelectId = useId();
   const [view, setView] = useState(initial);
   const [offline, setOffline] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [findingsCopied, setFindingsCopied] = useState(false);
+  const [findingsCopyError, setFindingsCopyError] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
+  const [cutAudience, setCutAudience] = useState<Audience>("investor");
+  const [cutting, setCutting] = useState(false);
+  const [cutError, setCutError] = useState<string | null>(null);
   const finished = view.job.status === "done" || view.job.status === "failed";
 
   // Poll every 2 seconds until the job is done or failed.
@@ -217,12 +328,12 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
   async function tryAgain() {
     setRetrying(true);
     setRetryError(null);
-    const { mode, style, url, repoUrl, goal, language } = view.job;
+    const { mode, style, audience, url, repoUrl, goal, language } = view.job;
     try {
       const response = await fetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode, style, url, repoUrl, goal, language }),
+        body: JSON.stringify({ mode, style, audience, url, repoUrl, goal, language }),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok || !body.id) throw new Error(body.error);
@@ -234,6 +345,87 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
           : "We could not start it again. Check your connection and press Try again.",
       );
       setRetrying(false);
+    }
+  }
+
+  async function makeAudienceCut() {
+    setCutting(true);
+    setCutError(null);
+    const availableAudiences = (Object.keys(AUDIENCES) as Audience[]).filter(
+      (audience) => audience !== view.job.audience,
+    );
+    const selectedAudience = availableAudiences.includes(cutAudience)
+      ? cutAudience
+      : availableAudiences[0] ?? "new-user";
+    try {
+      const response = await fetch("/api/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: view.job.mode,
+          style: view.job.style,
+          audience: selectedAudience,
+          url: view.job.url,
+          repoUrl: view.job.repoUrl,
+          goal: view.job.goal,
+          language: view.job.language,
+        }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || !body.id) throw new Error(body.error);
+      router.push(`/jobs/${body.id}`);
+    } catch (problem) {
+      setCutError(
+        problem instanceof Error && problem.message
+          ? problem.message
+          : "We could not make that cut. Check your connection and try again.",
+      );
+      setCutting(false);
+    }
+  }
+
+  function selectFinding(finding: FindingItem) {
+    const video = videoRef.current;
+    if (!video) return;
+
+    let sceneStart = view.sceneStarts[finding.stepId];
+    if (sceneStart === undefined) {
+      const precedingStep = view.stepFile?.steps
+        .filter(
+          (step) =>
+            step.index < finding.stepIndex &&
+            view.sceneStarts[step.id] !== undefined,
+        )
+        .sort((left, right) => right.index - left.index)[0];
+      sceneStart = precedingStep ? view.sceneStarts[precedingStep.id] : 0;
+    }
+
+    const seekAndPlay = () => {
+      video.currentTime = sceneStart!;
+      void video.play().catch(() => undefined);
+    };
+    if (video.readyState > 0) seekAndPlay();
+    else video.addEventListener("loadedmetadata", seekAndPlay, { once: true });
+  }
+
+  async function copyFindings() {
+    const report = view.findings;
+    if (!report) return;
+    const lines = report.findings.map(
+      (finding) =>
+        `- [${SEVERITY_LABELS[finding.severity]}] Step ${finding.stepIndex}: ${finding.description}`,
+    );
+    try {
+      await navigator.clipboard.writeText(
+        lines.length > 0
+          ? `${report.summary}\n\n${lines.join("\n")}`
+          : report.summary,
+      );
+      setFindingsCopyError(false);
+      setFindingsCopied(true);
+      window.setTimeout(() => setFindingsCopied(false), 2500);
+    } catch {
+      setFindingsCopyError(true);
     }
   }
 
@@ -262,15 +454,61 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
     );
   }
 
+  if (view.job.status === "done" && view.stepFile?.goalAchieved === false) {
+    return (
+      <div className={styles.doneLayout}>
+        <section className={`${styles.card} ${styles.videoColumn}`} aria-live="polite">
+          <h1 className={styles.pageTitle}>We could not complete this route</h1>
+          <p className={styles.lead}>
+            {view.stepFile.resultText?.trim() || "The AI visitor explored the page but could not finish the goal."}
+          </p>
+          <p className={styles.fieldNote}>
+            No video was made. What to try: press Try again, change the goal, or use a page that opens
+            without signing in.
+          </p>
+          {retryError && (
+            <p className={styles.error} role="alert">
+              {retryError}
+            </p>
+          )}
+          <button type="button" className={styles.primary} onClick={tryAgain} disabled={retrying}>
+            {retrying ? "Starting again..." : "Try again"}
+          </button>
+          <Link href="/" className={styles.secondaryLink}>
+            Make a different video
+          </Link>
+        </section>
+        <aside className={styles.panels}>
+          <WhatWeFoundPanel
+            jobId={view.job.id}
+            report={view.findings}
+            copied={findingsCopied}
+            copyError={findingsCopyError}
+            onSelect={null}
+            onCopy={copyFindings}
+          />
+        </aside>
+      </div>
+    );
+  }
+
   if (view.job.status === "done") {
     const video = view.videos.landscape ?? view.videos.vertical;
+    const verticalVideo = !view.videos.landscape && Boolean(view.videos.vertical);
+    const otherAudiences = (Object.keys(AUDIENCES) as Audience[]).filter(
+      (audience) => audience !== view.job.audience,
+    );
+    const selectedCutAudience = otherAudiences.includes(cutAudience)
+      ? cutAudience
+      : otherAudiences[0] ?? "new-user";
     return (
       <div className={styles.doneLayout}>
         <section className={styles.videoColumn}>
           <h1 className={styles.pageTitle}>{title}</h1>
           {video ? (
             <video
-              className={styles.video}
+              ref={videoRef}
+              className={`${styles.video} ${verticalVideo ? styles.videoVertical : ""}`}
               src={video}
               controls
               playsInline
@@ -291,11 +529,45 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
               {copied ? "Link copied" : "Share link"}
             </button>
           </div>
+          <div className={styles.audienceCut}>
+            <label className={styles.audienceCutLabel} htmlFor={audienceSelectId}>
+              Audience
+            </label>
+            <select
+              id={audienceSelectId}
+              className={styles.input}
+              value={selectedCutAudience}
+              onChange={(event) => setCutAudience(event.target.value as Audience)}
+            >
+              {otherAudiences.map((audience) => (
+                <option key={audience} value={audience}>
+                  {AUDIENCES[audience].label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className={styles.secondary}
+              onClick={makeAudienceCut}
+              disabled={cutting}
+            >
+              {cutting ? "Making the cut..." : "Make a cut for another audience"}
+            </button>
+            {cutError && <p className={styles.error} role="alert">{cutError}</p>}
+          </div>
           <Link href="/" className={styles.secondaryLink}>
             Make another video
           </Link>
         </section>
         <aside className={styles.panels}>
+          <WhatWeFoundPanel
+            jobId={view.job.id}
+            report={view.findings}
+            copied={findingsCopied}
+            copyError={findingsCopyError}
+            onSelect={selectFinding}
+            onCopy={copyFindings}
+          />
           <section className={styles.panel} aria-labelledby="steps-title">
             <h2 id="steps-title" className={styles.panelTitle}>
               Steps
