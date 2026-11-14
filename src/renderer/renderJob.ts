@@ -12,7 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
-import { settings } from "./settings";
+import { defaultStyle, settingsFor, type Style } from "./settings";
 import { validateStepFile, type StepFile } from "../shared/stepFile";
 import { visibleSteps, type Aspect, type VideoProps } from "./timeline";
 
@@ -20,6 +20,26 @@ export interface RenderOptions {
   aspect: Aspect;
   /** Add background music when public/music.mp3 exists. */
   music: boolean;
+  /**
+   * The look of the video. When left out, demo videos use "trailer" and
+   * how-to videos use "tutorial".
+   */
+  style?: Style;
+}
+
+/**
+ * Wraps the caller's progress callback so the numbers it receives are whole,
+ * only ever go up, never repeat, and never jump by more than 5. If the real
+ * progress leaps ahead (for example from 0 to 15), the steps in between are
+ * reported first, so a progress bar always moves in small steps.
+ */
+function steadyProgress(onProgress?: (percent: number) => void) {
+  let last = -1;
+  return (percent: number) => {
+    const next = Math.min(100, Math.round(percent));
+    while (next - last > 5) onProgress?.((last = Math.max(last, 0) + 5));
+    if (next > last) onProgress?.((last = next));
+  };
 }
 
 /** Read and check steps.json. Errors say what is wrong in plain words. */
@@ -71,6 +91,8 @@ function preparePublicFolder(
   });
 
   // Music is shared by all jobs and lives in the app's own public folder.
+  // The file name is the same in every style, so any style's settings do.
+  const settings = settingsFor("trailer");
   const musicSource = path.resolve("public", settings.music.file);
   const hasMusic = wantMusic && fs.existsSync(musicSource);
   if (hasMusic) fs.copyFileSync(musicSource, path.join(publicDir, settings.music.file));
@@ -92,7 +114,7 @@ export async function renderJob(
   onProgress?: (percent: number) => void,
 ): Promise<string> {
   jobFolder = path.resolve(jobFolder);
-  const report = (percent: number) => onProgress?.(Math.round(percent));
+  const report = steadyProgress(onProgress);
   report(0);
 
   const publicDir = fs.mkdtempSync(path.join(os.tmpdir(), "render-public-"));
@@ -103,7 +125,12 @@ export async function renderJob(
       readStepFile(jobFolder),
       options.music,
     );
-    const inputProps: VideoProps = { stepFile, aspect: options.aspect, music: hasMusic };
+    const inputProps: VideoProps = {
+      stepFile,
+      aspect: options.aspect,
+      style: options.style ?? defaultStyle(stepFile.mode),
+      music: hasMusic,
+    };
 
     // Step 1 (0 to 15 percent): pack the React code into a small website.
     // ponytail: this re-bundles on every render (a few seconds). Cache the

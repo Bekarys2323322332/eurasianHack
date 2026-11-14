@@ -8,7 +8,7 @@
  */
 import React from "react";
 import { Composition, registerRoot } from "remotion";
-import { settings } from "./settings";
+import { FPS, settingsFor } from "./settings";
 import { buildTimeline, type VideoProps } from "./timeline";
 import { JobVideo } from "./Video";
 
@@ -26,6 +26,7 @@ const emptyProps: VideoProps = {
     steps: [],
   },
   aspect: "16:9",
+  style: "trailer",
   music: false,
 };
 
@@ -33,15 +34,15 @@ const Root: React.FC = () => (
   <Composition
     id="JobVideo"
     component={JobVideo}
-    fps={settings.fps}
+    fps={FPS}
     // These three are overwritten by calculateMetadata below.
     width={1920}
     height={1080}
     durationInFrames={1}
     defaultProps={emptyProps}
     calculateMetadata={({ props }) => ({
-      ...settings.sizes[props.aspect],
-      durationInFrames: buildTimeline(props.stepFile).totalFrames,
+      ...settingsFor(props.style).sizes[props.aspect],
+      durationInFrames: buildTimeline(props.stepFile, settingsFor(props.style)).totalFrames,
     })}
   />
 );
