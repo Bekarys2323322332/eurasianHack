@@ -54,6 +54,18 @@ export function enqueueJob(jobId: string) {
   void drain();
 }
 
+/**
+ * The app is shared through a public tunnel, so cap how many jobs can wait.
+ * Each one runs a browser and ffmpeg, and a long line is useless to visitors anyway.
+ */
+const MAX_WAITING_JOBS = 10;
+
+/** True when the line is full and new jobs should be turned away for now. */
+export function isQueueFull(): boolean {
+  resumePendingJobs();
+  return state.queue.length >= MAX_WAITING_JOBS;
+}
+
 /** 0 when the job is running or not queued, otherwise its place in line (1 = next). */
 export function queuePosition(jobId: string): number {
   const index = state.queue.indexOf(jobId);

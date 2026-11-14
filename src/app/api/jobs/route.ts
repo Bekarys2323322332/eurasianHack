@@ -7,7 +7,7 @@
 import { z } from "zod";
 import { createJob } from "../../../shared/jobs";
 import { JOB_MODES } from "../../../shared/stepFile";
-import { enqueueJob } from "../../_lib/pipeline";
+import { enqueueJob, isQueueFull } from "../../_lib/pipeline";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -65,6 +65,13 @@ export async function POST(request: Request) {
     return Response.json(
       { error: "Tell us what the video should show, for example: How to create a new project." },
       { status: 400 },
+    );
+  }
+
+  if (isQueueFull()) {
+    return Response.json(
+      { error: "Too many videos are being made right now. Please try again in a few minutes." },
+      { status: 503 },
     );
   }
 
