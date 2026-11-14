@@ -49,13 +49,7 @@ export async function register() {
   }
 
   for (const warning of report.result.warnings) {
-    if (warning.name === "TTS_API_KEY") {
-      console.warn(
-        "Warning: TTS_API_KEY is not set. Videos will have no voiceover until you add it to .env.",
-      );
-    } else {
-      console.warn(`Warning: ${warning.name} is not ready.`);
-    }
+    console.warn(`Warning: ${warning.name} is not ready.`);
   }
 
   console.log("Startup check passed");

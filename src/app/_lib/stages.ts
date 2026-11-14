@@ -1,14 +1,14 @@
 /**
- * The two stages the web app does not own: the browser agent (src/agent) and
- * the video renderer (src/renderer). Both are built on other branches.
- *
- * The pipeline only talks to them through this file, so swapping a stub for
- * the real thing is a one-line change here:
- *
- *   export { runAgent } from "../../agent";
- *   export { renderJob } from "../../renderer/renderJob";
- *
- * Until then the stubs below let the whole page flow be tested today.
+ * Keep the web pipeline's stage imports in one place while using the real
+ * browser agent and Remotion renderer.
  */
-export { runAgentStub as runAgent, renderJobStub as renderJob } from "./stubs";
-export type { AgentResult, RenderOptions } from "./stubs";
+export { runAgent } from "../../agent";
+export type { AgentResult } from "../../agent";
+export { writeScript } from "../../agent/script";
+export { appendCostCall } from "../../agent/cost";
+export type { AgentCostCall } from "../../agent/cost";
+export { renderJob } from "../../renderer/renderJob";
+export type { RenderOptions } from "../../renderer/renderJob";
+export { generateVoice } from "../../voice/generateVoice";
+export type { VoiceOptions, VoiceSummary } from "../../voice/generateVoice";
+export { PROVIDER_NAME } from "../../voice/provider";

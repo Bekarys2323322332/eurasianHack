@@ -36,8 +36,8 @@ import {
   detectLoginWall,
   extractInteractiveElements,
   extractVisibleText,
-  isPrivateHost,
   performBrowserAction,
+  resolvesToPrivate,
   type AgentAction,
   type InteractiveElement,
 } from "./browser";
@@ -152,16 +152,32 @@ export async function runAgent(
       viewport: VIEWPORT,
       serviceWorkers: "block",
     });
+    const privateHostChecks = new Map<string, Promise<boolean>>();
     await context.route("**/*", async (route) => {
       let hostname: string;
       try {
-        hostname = new URL(route.request().url()).hostname;
+        hostname = new URL(route.request().url()).hostname
+          .trim()
+          .toLowerCase()
+          .replace(/\.$/, "")
+          .replace(/^\[|\]$/g, "");
       } catch {
         await route.abort();
         return;
       }
 
-      if (isPrivateHost(hostname)) {
+      if (!hostname) {
+        await route.continue();
+        return;
+      }
+
+      let privateCheck = privateHostChecks.get(hostname);
+      if (!privateCheck) {
+        privateCheck = resolvesToPrivate(hostname);
+        privateHostChecks.set(hostname, privateCheck);
+      }
+
+      if (await privateCheck) {
         await route.abort();
       } else {
         await route.continue();

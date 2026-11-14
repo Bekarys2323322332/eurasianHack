@@ -7,7 +7,15 @@
  * create a second copy.
  */
 import { getJob, getJobDir, listJobs, updateJob, type Job } from "../../shared/jobs";
-import { renderJob, runAgent } from "./stages";
+import { LANGUAGES } from "../../voice/config";
+import {
+  appendCostCall,
+  generateVoice,
+  PROVIDER_NAME,
+  renderJob,
+  runAgent,
+  writeScript,
+} from "./stages";
 
 interface PipelineState {
   queue: string[];
@@ -100,12 +108,29 @@ async function runPipeline(jobId: string) {
   try {
     await runAgent(job);
 
-    // The script and voice stages are built in a later task (Prompt D).
-    // The statuses are already set here so the progress view shows them.
     stage = "writing the script";
     updateJob(jobId, { status: "scripting", progressMessage: "Writing the script" });
+    const jobFolder = getJobDir(jobId);
+    const scriptCall = await writeScript(jobFolder, {
+      languageName: LANGUAGES[job.language]?.label ?? "English",
+    });
+    appendCostCall(jobFolder, "script", scriptCall);
+
     stage = "recording the voice";
     updateJob(jobId, { status: "voicing", progressMessage: "Recording the voice" });
+    const voiceSummary = await generateVoice(jobFolder, { language: job.language });
+    appendCostCall(jobFolder, "voice", {
+      model: PROVIDER_NAME,
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: voiceSummary.totalCost,
+    });
+    if (voiceSummary.failed > 0) {
+      console.warn(
+        `Voice generation failed for ${voiceSummary.failed} step(s); the renderer will use silent audio for them.`,
+        voiceSummary.failures,
+      );
+    }
 
     stage = "building the video";
     updateJob(jobId, { status: "rendering", progressMessage: "Building the video" });
