@@ -12,6 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
+import { settings } from "./settings";
 import { validateStepFile, type StepFile } from "../shared/stepFile";
 import { visibleSteps, type Aspect, type VideoProps } from "./timeline";
 
@@ -20,9 +21,6 @@ export interface RenderOptions {
   /** Add background music when public/music.mp3 exists. */
   music: boolean;
 }
-
-/** Name the music file gets inside the temporary public folder. */
-export const MUSIC_FILE = "music.mp3";
 
 /** Read and check steps.json. Errors say what is wrong in plain words. */
 function readStepFile(jobFolder: string): StepFile {
@@ -73,9 +71,9 @@ function preparePublicFolder(
   });
 
   // Music is shared by all jobs and lives in the app's own public folder.
-  const musicSource = path.resolve("public", MUSIC_FILE);
+  const musicSource = path.resolve("public", settings.music.file);
   const hasMusic = wantMusic && fs.existsSync(musicSource);
-  if (hasMusic) fs.copyFileSync(musicSource, path.join(publicDir, MUSIC_FILE));
+  if (hasMusic) fs.copyFileSync(musicSource, path.join(publicDir, settings.music.file));
 
   return { ...stepFile, steps, hasMusic };
 }

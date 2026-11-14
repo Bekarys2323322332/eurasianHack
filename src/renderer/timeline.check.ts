@@ -6,7 +6,8 @@
  */
 import assert from "node:assert/strict";
 import type { Step, StepFile } from "../shared/stepFile";
-import { buildTimeline } from "./timeline";
+import { buildTimeline, musicVolume } from "./timeline";
+import { settings } from "./settings";
 
 const step = (id: string, extra: Partial<Step> = {}): Step => ({
   id,
@@ -45,9 +46,17 @@ const stepFile: StepFile = {
   ],
 };
 
-const { scenes } = buildTimeline(stepFile);
+const timeline = buildTimeline(stepFile);
+const { scenes, titleFrames } = timeline;
 assert.deepEqual(scenes.map((scene) => scene.step.id), ["silent", "spoken"]);
+assert.equal(scenes[0].from, titleFrames); // scenes start after the title card
 assert.equal(scenes[0].frames, 75); // 2.5 seconds at 30 frames per second
 assert.equal(scenes[1].frames, 90); // 2.4 + 0.6 seconds
 assert.equal(scenes[1].from, scenes[0].from + scenes[0].frames);
+assert.equal(timeline.totalFrames, timeline.endFrom + timeline.endFrames);
+
+// Music is at full level away from narration and lowered in the middle of it.
+assert.equal(musicVolume(scenes[0].from, timeline), settings.music.volume);
+assert.equal(musicVolume(scenes[1].from + 30, timeline), settings.music.volumeUnderNarration);
+assert.equal(musicVolume(timeline.totalFrames, timeline), 0);
 console.log("timeline check passed");
