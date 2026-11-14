@@ -138,6 +138,29 @@ describe("summarizeCost", () => {
     });
   });
 
+  it("leaves unpriced calls out of the routing comparison", () => {
+    const summary = summarizeCost(
+      costFile([
+        costCall("agent-step-1", {
+          costUsd: 0.001,
+          baselineCostUsd: 0.01,
+          tier: "small",
+        }),
+        costCall("agent-step-2", {
+          costUsd: null,
+          inputTokens: 1_000_000,
+          outputTokens: 0,
+          tier: "small",
+        }),
+      ]),
+      strongModel,
+    );
+
+    expect(summary.baselineCostUsd).toBe(0.01);
+    expect(summary.percentSaved).toBe(90);
+    expect(summary.modelStages[0].baselineCostUsd).toBe(0.01);
+  });
+
   it("hides the savings percentage when the model baseline is zero", () => {
     const summary = summarizeCost(
       costFile([costCall("planner", { costUsd: 0, baselineCostUsd: 0 })]),

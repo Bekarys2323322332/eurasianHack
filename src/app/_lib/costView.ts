@@ -102,11 +102,12 @@ export function summarizeCost(file: AgentCostFile, strongModel: string | null): 
       row.knownCalls += 1;
       totalCostUsd += call.costUsd;
       modelCostUsd += call.costUsd;
+
+      const baselineCostUsd = callBaseline(call, strongModel);
+      row.baselineCostUsd += baselineCostUsd;
+      totalBaselineCostUsd += baselineCostUsd;
     }
 
-    const baselineCostUsd = callBaseline(call, strongModel);
-    row.baselineCostUsd += baselineCostUsd;
-    totalBaselineCostUsd += baselineCostUsd;
     row.inputTokens += call.inputTokens;
     row.outputTokens += call.outputTokens;
     row.models.add(call.model);
