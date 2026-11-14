@@ -72,7 +72,7 @@ export function newErrorMessages(before: string, after: string): string[] {
     text
       .split(/(?<=[.!?])\s+|\s{2,}|\n+/)
       .map((part) => part.trim())
-      .filter((part) => part.length >= 8 && part.length <= 200);
+      .filter((part) => part.length >= 8 && part.length <= 300);
   const seen = new Set(split(before));
   const fresh: string[] = [];
   for (const sentence of split(after)) {
@@ -298,7 +298,9 @@ export async function runAgent(
       }
     };
 
-    for (let index = 1; index <= MAX_STEPS; index += 1) {
+    for (let attempt = 1; attempt <= MAX_STEPS + 2; attempt += 1) {
+      const index = stepFile.steps.length + 1;
+      if (index > MAX_STEPS) break;
       const [visibleText, elements] = await Promise.all([
         extractVisibleText(page),
         extractInteractiveElements(page),
@@ -344,7 +346,9 @@ export async function runAgent(
           const chosen = actionResult.data;
           const chosenTarget =
             chosen.elementNumber === null ? null : elements.find((element) => element.number === chosen.elementNumber) ?? null;
-          signature = [chosen.action, chosenTarget?.text ?? chosen.elementNumber ?? "", chosen.text ?? ""].join("|").toLowerCase();
+          signature = [page.url(), chosen.action, chosenTarget?.text ?? chosen.elementNumber ?? "", chosen.text ?? ""]
+            .join("|")
+            .toLowerCase();
           if (chosen.done || !attempted.has(signature)) break;
           retryNote = `You just chose "${chosen.action} ${chosenTarget?.text ?? ""} ${chosen.text ?? ""}", which was already tried and failed. Choose a different element or different text.`;
         } while (chooseAttempts < 2);
@@ -375,8 +379,7 @@ export async function runAgent(
         if (doneClaims >= 2) break;
         continue;
       }
-      const repeated = !action.done && attempted.has(signature);
-      if (!action.done) attempted.add(signature);
+      const repeated = attempted.has(signature);
 
       const target =
         action.elementNumber === null
@@ -460,6 +463,7 @@ export async function runAgent(
         hidden: false,
       };
       stepFile.steps.push(step);
+      if (step.status === "deadend") attempted.add(signature);
       reportProgress(
         job.id,
         "running",

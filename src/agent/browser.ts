@@ -157,7 +157,12 @@ export async function extractVisibleText(page: Page): Promise<string> {
   return page.evaluate(() => {
     const body = document.body;
     if (!body) return "";
-    return body.innerText.replace(/\s+/g, " ").trim().slice(0, 8_000);
+    return body.innerText
+      .replace(/[ \t\r]+/g, " ")
+      .replace(/ ?\n ?/g, "\n")
+      .replace(/\n{2,}/g, "\n")
+      .trim()
+      .slice(0, 8_000);
   });
 }
 
