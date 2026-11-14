@@ -40,6 +40,12 @@ describe("job store", () => {
     expect(listJobs().map((j) => j.id)).toContain(job.id);
   });
 
+  it("stores the source job for another-language jobs", () => {
+    const job = createJob({ mode: "demo", url: "https://example.com", language: "ru", sourceJobId: "abc123" });
+    expect(getJob(job.id)?.sourceJobId).toBe("abc123");
+    expect(createJob({ mode: "demo", url: "https://example.com" }).sourceJobId).toBeNull();
+  });
+
   it("returns null for a missing job", () => {
     expect(getJob("nope")).toBeNull();
   });

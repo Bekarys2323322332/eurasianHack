@@ -12,6 +12,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { Fragment, useEffect, useId, useRef, useState } from "react";
 import { AUDIENCES, type Audience } from "../../shared/audiences";
+import { LANGUAGES } from "../../voice/config";
 import type { JobView } from "../_lib/jobView";
 import type { Step, StepFile } from "../../shared/stepFile";
 import type { CostSummary } from "../_lib/costView";
@@ -386,6 +387,10 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
   const [cutAudience, setCutAudience] = useState<Audience>("investor");
+  const languageSelectId = useId();
+  const [cutLanguage, setCutLanguage] = useState<string | null>(null);
+  const [translating, setTranslating] = useState(false);
+  const [translateError, setTranslateError] = useState<string | null>(null);
   const [cutting, setCutting] = useState(false);
   const [cutError, setCutError] = useState<string | null>(null);
   const finished = view.job.status === "done" || view.job.status === "failed";
@@ -427,12 +432,12 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
   async function tryAgain() {
     setRetrying(true);
     setRetryError(null);
-    const { mode, style, audience, url, repoUrl, goal, language } = view.job;
+    const { mode, style, audience, url, repoUrl, goal, language, sourceJobId } = view.job;
     try {
       const response = await fetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode, style, audience, url, repoUrl, goal, language }),
+        body: JSON.stringify({ mode, style, audience, url, repoUrl, goal, language, sourceJobId }),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok || !body.id) throw new Error(body.error);
@@ -444,6 +449,37 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
           : "We could not start it again. Check your connection and press Try again.",
       );
       setRetrying(false);
+    }
+  }
+
+  async function makeAnotherLanguage(language: string) {
+    setTranslating(true);
+    setTranslateError(null);
+    try {
+      const response = await fetch("/api/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: view.job.mode,
+          style: view.job.style,
+          audience: view.job.audience,
+          url: view.job.url,
+          repoUrl: view.job.repoUrl,
+          goal: view.job.goal,
+          language,
+          sourceJobId: view.job.id,
+        }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || !body.id) throw new Error(body.error);
+      router.push(`/jobs/${body.id}`);
+    } catch (problem) {
+      setTranslateError(
+        problem instanceof Error && problem.message
+          ? problem.message
+          : "We could not start the other language. Check your connection and try again.",
+      );
+      setTranslating(false);
     }
   }
 
@@ -600,6 +636,9 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
   if (view.job.status === "done") {
     const video = view.videos.landscape ?? view.videos.vertical;
     const verticalVideo = !view.videos.landscape && Boolean(view.videos.vertical);
+    const otherLanguages = Object.keys(LANGUAGES).filter((code) => code !== view.job.language);
+    const selectedCutLanguage =
+      cutLanguage && otherLanguages.includes(cutLanguage) ? cutLanguage : otherLanguages[0] ?? "en";
     const otherAudiences = (Object.keys(AUDIENCES) as Audience[]).filter(
       (audience) => audience !== view.job.audience,
     );
@@ -665,6 +704,37 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
             </button>
             {cutError && <p className={styles.error} role="alert">{cutError}</p>}
           </div>
+          {otherLanguages.length > 0 && (
+            <div className={styles.audienceCut}>
+              <label className={styles.audienceCutLabel} htmlFor={languageSelectId}>
+                Language
+              </label>
+              <select
+                id={languageSelectId}
+                className={styles.input}
+                value={selectedCutLanguage}
+                onChange={(event) => setCutLanguage(event.target.value)}
+              >
+                {otherLanguages.map((code) => (
+                  <option key={code} value={code}>
+                    {LANGUAGES[code].label}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className={styles.secondary}
+                onClick={() => makeAnotherLanguage(selectedCutLanguage)}
+                disabled={translating}
+              >
+                {translating ? "Starting..." : "Make another language"}
+              </button>
+              <p className={styles.audienceDescription}>
+                Same steps, new narration and captions. The site is not explored again.
+              </p>
+              {translateError && <p className={styles.error} role="alert">{translateError}</p>}
+            </div>
+          )}
           <Link href="/" className={styles.secondaryLink}>
             Make another video
           </Link>

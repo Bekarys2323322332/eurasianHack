@@ -8,6 +8,8 @@
  */
 import { getJob, getJobDir, listJobs, updateJob, type Job } from "../../shared/jobs";
 import { LANGUAGES } from "../../voice/config";
+import { copyStepsForNewJob } from "./reuseSteps";
+import type { StepFile } from "../../shared/stepFile";
 import {
   appendCostCall,
   generateVoice,
@@ -118,9 +120,16 @@ async function runPipeline(jobId: string) {
   if (!job) return;
   let stage = "exploring the site";
   try {
-    const { stepFile } = await runAgent(job);
     const jobFolder = getJobDir(jobId);
     const languageName = LANGUAGES[job.language]?.label ?? "English";
+    let stepFile: StepFile;
+    if (job.sourceJobId) {
+      stage = "reusing the recorded steps";
+      updateJob(jobId, { status: "scripting", progressMessage: "Reusing the recorded steps" });
+      stepFile = copyStepsForNewJob(getJobDir(job.sourceJobId), jobFolder, jobId, job.language);
+    } else {
+      stepFile = (await runAgent(job)).stepFile;
+    }
 
     if (stepFile.goalAchieved === false) {
       await writeFindingsSafely(jobId, jobFolder, languageName);
@@ -146,7 +155,7 @@ async function runPipeline(jobId: string) {
     });
 
     stage = "writing up what we found";
-    await writeFindingsSafely(jobId, jobFolder, languageName);
+    if (!job.sourceJobId) await writeFindingsSafely(jobId, jobFolder, languageName);
 
     stage = "recording the voice";
     updateJob(jobId, { status: "voicing", progressMessage: "Recording the voice" });
