@@ -7,14 +7,19 @@
  * out from the current frame number, which is what makes the render
  * repeatable frame by frame.
  *
+ * The three styles (trailer, tutorial, social) share this one file. Each
+ * component looks at settings.look to decide which design to draw, so all
+ * the differences between styles are switched from settings.ts.
+ *
  * Screenshot and audio paths are loaded with staticFile(), which points at
  * the "public" folder that renderJob.ts fills with the job's files.
  *
  * Layers, from back to front:
- *   gradient background
- *   stage (zooms as one piece): browser window with the screenshots,
- *     click ripple, cursor
+ *   background colour, or a blurred copy of the page
+ *   stage (zooms as one piece): the page (in a window or bare),
+ *     click mark, cursor
  *   typing chip and caption (never zoom, so they stay readable)
+ *   progress bar
  */
 import React, { createContext, useContext, useMemo } from "react";
 import {
@@ -51,11 +56,20 @@ const useSettings = () => useContext(SettingsContext);
 const CLAMP = { extrapolateLeft: "clamp", extrapolateRight: "clamp" } as const;
 /** Slow start, slow finish. Used for every camera and cursor move. */
 const SMOOTH = { ...CLAMP, easing: Easing.inOut(Easing.cubic) };
+/** Fast start, slow finish. Used for things that pop or slide in. */
+const POP = { ...CLAMP, easing: Easing.out(Easing.cubic) };
+
+/**
+ * Seconds to frames for a fade, never less than one frame. Styles with hard
+ * cuts set their fades close to zero, and a zero-length animation would be
+ * an error.
+ */
+const fadeFrames = (seconds: number) => Math.max(1, toFrames(seconds));
 
 /** "https://example.com/" becomes "example.com" for display. */
 const prettyUrl = (url: string) => url.replace(/^https?:\/\//, "").replace(/\/$/, "");
 
-/** Where the browser window sits in the frame, and how to map page spots into it. */
+/** Where the page sits in the frame, and how to map page spots into it. */
 interface Layout {
   frame: { width: number; height: number };
   window: { left: number; top: number; width: number; height: number };
@@ -68,7 +82,8 @@ interface Layout {
 function makeLayout(stepFile: StepFile, aspect: Aspect, settings: Settings): Layout {
   const frame = settings.sizes[aspect];
   const { windowWidth, windowCenterY } = settings.layout[aspect];
-  const { barHeight } = settings.window;
+  // Without window chrome there is no top bar above the page.
+  const barHeight = settings.look.windowChrome ? settings.window.barHeight : 0;
   // The screenshot is scaled so its width matches the window.
   const scale = windowWidth / stepFile.viewport.width;
   const content = { width: windowWidth, height: stepFile.viewport.height * scale };
@@ -85,70 +100,58 @@ function makeLayout(stepFile: StepFile, aspect: Aspect, settings: Settings): Lay
 
 /** The whole video: title card, one scene per visible step, end card. */
 export const JobVideo: React.FC<VideoProps> = ({ stepFile, aspect, style, music }) => {
-  const frame = useCurrentFrame();
   const settings = settingsFor(style);
   const timeline = useMemo(() => buildTimeline(stepFile, settings), [stepFile, settings]);
   const layout = useMemo(
     () => makeLayout(stepFile, aspect, settings),
     [stepFile, aspect, settings],
   );
-  const { howto, titleFrames, scenes, endFrom, endFrames } = timeline;
+  const { howto, titleFrames, scenes, endFrom, endFrames, totalFrames } = timeline;
+  const address = prettyUrl(stepFile.url);
   // "How to create a project": the goal with its first letter in lower case.
   const howToTitle = stepFile.goal
     ? `${settings.words.howTo} ${stepFile.goal[0].toLowerCase()}${stepFile.goal.slice(1)}`
     : stepFile.title;
-  const fade = toFrames(settings.timing.softFadeSeconds);
-  const address = prettyUrl(stepFile.url);
-
-  // The steps as a whole fade in after the title card and out before the
-  // end card, so the window does not pop in and out.
-  const stepsOpacity =
-    scenes.length > 0
-      ? interpolate(
-          frame,
-          [titleFrames, titleFrames + fade, endFrom - fade, endFrom],
-          [0, 1, 1, 0],
-          CLAMP,
-        )
-      : 0;
 
   return (
     <SettingsContext.Provider value={settings}>
       <AbsoluteFill
-        style={{ background: settings.colors.backgroundGradient, fontFamily: settings.fontFamily }}
+        style={{ background: settings.colors.background, fontFamily: settings.fontFamily }}
       >
-      {music ? (
-        <Audio
-          src={staticFile(settings.music.file)}
-          loop
-          // Called for every frame: quieter while narration plays.
-          volume={(musicFrame) => musicVolume(musicFrame, timeline, settings)}
-        />
-      ) : null}
-
-      <Sequence durationInFrames={titleFrames}>
-        {howto ? (
-          // How-to videos open with what the viewer will learn.
-          <Card
-            title={howToTitle}
-            subtitle={stepFile.title}
-            smallTitle
-            frames={titleFrames}
-            aspect={aspect}
+        {music ? (
+          <Audio
+            src={staticFile(settings.music.file)}
+            loop
+            // Called for every frame: quieter while narration plays.
+            volume={(musicFrame) => musicVolume(musicFrame, timeline, settings)}
           />
-        ) : (
-          <Card
-            // Only the name: in demo mode the goal is written for the agent,
-            // not for viewers.
-            title={stepFile.title || address}
-            subtitle=""
-            frames={titleFrames}
-            aspect={aspect}
-          />
-        )}
-      </Sequence>
+        ) : null}
 
-      <AbsoluteFill style={{ opacity: stepsOpacity }}>
+        {/* Styles with a title card length of 0 open straight on the first step. */}
+        {titleFrames > 0 ? (
+          <Sequence durationInFrames={titleFrames}>
+            {howto ? (
+              // How-to videos open with what the viewer will learn.
+              <Card
+                title={howToTitle}
+                subtitle={stepFile.title}
+                smallTitle
+                frames={titleFrames}
+                aspect={aspect}
+              />
+            ) : (
+              <Card
+                // Only the name: in demo mode the goal is written for the
+                // agent, not for viewers.
+                title={stepFile.title || address}
+                subtitle=""
+                frames={titleFrames}
+                aspect={aspect}
+              />
+            )}
+          </Sequence>
+        ) : null}
+
         {scenes.map((scene) => (
           // Inside a Sequence, useCurrentFrame() starts again from 0, so each
           // scene can think in "frames since my own start".
@@ -157,27 +160,28 @@ export const JobVideo: React.FC<VideoProps> = ({ stepFile, aspect, style, music 
             {howto ? <Badge number={scene.number} total={scenes.length} aspect={aspect} /> : null}
           </Sequence>
         ))}
-      </AbsoluteFill>
 
-      <Sequence from={endFrom} durationInFrames={endFrames}>
-        {howto ? (
-          <RecapCard
-            heading={howToTitle}
-            lines={scenes.map((scene) => recapLine(scene.step))}
-            address={address}
-            frames={endFrames}
-            aspect={aspect}
-          />
-        ) : (
-          <Card
-            title={stepFile.title}
-            subtitle={address}
-            strongSubtitle
-            frames={endFrames}
-            aspect={aspect}
-          />
-        )}
-      </Sequence>
+        <Sequence from={endFrom} durationInFrames={endFrames}>
+          {howto ? (
+            <RecapCard
+              heading={howToTitle}
+              lines={scenes.map((scene) => recapLine(scene.step))}
+              address={address}
+              frames={endFrames}
+              aspect={aspect}
+            />
+          ) : (
+            <Card
+              title={stepFile.title}
+              subtitle={address}
+              strongSubtitle
+              frames={endFrames}
+              aspect={aspect}
+            />
+          )}
+        </Sequence>
+
+        {settings.look.progressBar ? <ProgressBar totalFrames={totalFrames} /> : null}
       </AbsoluteFill>
     </SettingsContext.Provider>
   );
@@ -194,6 +198,7 @@ const SceneView: React.FC<{
   const settings = useSettings();
   const { step, plan } = scene;
   const t = settings.timing;
+  const { look } = settings;
   const { zoom, zoomPullToCenter } = settings.layout[aspect];
 
   // Cursor: travels from the previous step's spot to this step's spot.
@@ -239,48 +244,100 @@ const SceneView: React.FC<{
       ? Number(frame >= plan.switchAt)
       : interpolate(frame, [plan.switchAt, plan.switchAt + plan.transitionFrames], [0, 1], SMOOTH);
 
+  // Hand-over between scenes. "arrive" runs 0 to 1 at the start of the
+  // scene and "leave" runs 0 to 1 at its end. A glide moves the stage
+  // sideways as well as fading it; a fade only fades; a cut does neither.
+  const handOver = fadeFrames(look.sceneTransitionSeconds);
+  const arrive =
+    look.sceneTransition === "cut" ? 1 : interpolate(frame, [0, handOver], [0, 1], POP);
+  const leave =
+    look.sceneTransition === "cut"
+      ? 0
+      : interpolate(frame, [scene.frames - handOver, scene.frames], [0, 1], {
+          ...CLAMP,
+          easing: Easing.in(Easing.cubic),
+        });
+  const slide =
+    look.sceneTransition === "glide" ? (1 - arrive - leave) * layout.frame.width * 0.45 : 0;
+
   return (
     <AbsoluteFill>
+      {look.backdrop === "blurredPage" ? (
+        <BlurredBackdrop
+          file={change < 0.5 ? step.screenshotBefore : step.screenshotAfter}
+        />
+      ) : null}
+
       <AbsoluteFill
-        style={{
-          transformOrigin: `${focus.x}px ${focus.y}px`,
-          transform: `translate(${shiftX}px, ${shiftY}px) scale(${1 + (zoom - 1) * zoomAmount})`,
-        }}
+        style={{ opacity: Math.min(arrive, 1 - leave), transform: `translateX(${slide}px)` }}
       >
-        <BrowserWindow layout={layout} address={address}>
-          {/*
-            Both screenshots are always mounted. That way Remotion has both
-            images loaded before the change and there is no empty flash.
-          */}
-          <Screenshot
-            file={step.screenshotBefore}
-            // A scroll pushes the old picture up and out of the window.
-            shiftPercent={plan.transition === "slide" ? -100 * change : 0}
-            opacity={1}
-          />
-          <Screenshot
-            file={step.screenshotAfter}
-            // A scroll brings the new picture up from below. Cuts and fades
-            // lay it on top and change how see-through it is.
-            shiftPercent={plan.transition === "slide" ? 100 * (1 - change) : 0}
-            opacity={plan.transition === "slide" ? 1 : change}
-          />
-        </BrowserWindow>
-        {plan.rippleAt !== null ? <Ripple at={plan.rippleAt} x={focus.x} y={focus.y} /> : null}
-        <Cursor x={cursor.x} y={cursor.y} clickAt={plan.rippleAt} />
+        <AbsoluteFill
+          style={{
+            transformOrigin: `${focus.x}px ${focus.y}px`,
+            transform: `translate(${shiftX}px, ${shiftY}px) scale(${1 + (zoom - 1) * zoomAmount})`,
+          }}
+        >
+          <PageFrame layout={layout} address={address}>
+            {/*
+              Both screenshots are always mounted. That way Remotion has both
+              images loaded before the change and there is no empty flash.
+            */}
+            <Screenshot
+              file={step.screenshotBefore}
+              // A scroll pushes the old picture up and out of the window.
+              shiftPercent={plan.transition === "slide" ? -100 * change : 0}
+              opacity={1}
+            />
+            <Screenshot
+              file={step.screenshotAfter}
+              // A scroll brings the new picture up from below. Cuts and fades
+              // lay it on top and change how see-through it is.
+              shiftPercent={plan.transition === "slide" ? 100 * (1 - change) : 0}
+              opacity={plan.transition === "slide" ? 1 : change}
+            />
+          </PageFrame>
+          {plan.rippleAt !== null ? <ClickMark at={plan.rippleAt} x={focus.x} y={focus.y} /> : null}
+          <Cursor x={cursor.x} y={cursor.y} clickAt={plan.rippleAt} />
+        </AbsoluteFill>
       </AbsoluteFill>
 
       {step.audioFile ? <Audio src={staticFile(step.audioFile)} /> : null}
       {plan.typing && step.typedText ? (
         <TypingChip text={step.typedText} typing={plan.typing} aspect={aspect} />
       ) : null}
-      {step.caption ? <Caption text={step.caption} aspect={aspect} /> : null}
+      {step.caption ? (
+        <Caption text={step.caption} aspect={aspect} sceneFrames={scene.frames} />
+      ) : null}
     </AbsoluteFill>
   );
 };
 
-/** Rounded window with a soft shadow, a small top bar and the page inside. */
-const BrowserWindow: React.FC<{
+/**
+ * A blurred, darkened copy of the page that fills the whole frame. Used by
+ * styles that have no window, so the picture reaches every edge even when
+ * the page is a different shape from the video.
+ */
+const BlurredBackdrop: React.FC<{ file: string }> = ({ file }) => (
+  <Img
+    src={staticFile(file)}
+    alt=""
+    style={{
+      position: "absolute",
+      width: "100%",
+      height: "100%",
+      objectFit: "cover",
+      // Scaled up a little so the soft blurred edge is outside the frame.
+      transform: "scale(1.25)",
+      filter: "blur(36px) brightness(0.42) saturate(1.3)",
+    }}
+  />
+);
+
+/**
+ * Holds the page. With window chrome: a rounded window with a soft shadow
+ * and a small top bar. Without: the bare page, edge to edge.
+ */
+const PageFrame: React.FC<{
   layout: Layout;
   address: string;
   children: React.ReactNode;
@@ -299,45 +356,47 @@ const BrowserWindow: React.FC<{
         backgroundColor: "#ffffff",
       }}
     >
-      <div
-        style={{
-          height: barHeight,
-          backgroundColor: colors.windowBar,
-          display: "flex",
-          alignItems: "center",
-          gap: 9,
-          padding: "0 18px",
-        }}
-      >
-        {colors.windowDots.map((color) => (
-          <div
-            key={color}
-            style={{ width: 13, height: 13, borderRadius: "50%", backgroundColor: color }}
-          />
-        ))}
+      {settings.look.windowChrome ? (
         <div
           style={{
-            marginLeft: 14,
-            padding: "3px 18px",
-            borderRadius: 999,
-            backgroundColor: "#ffffff",
-            color: colors.windowBarText,
-            fontSize: 18,
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
+            height: barHeight,
+            backgroundColor: colors.windowBar,
+            display: "flex",
+            alignItems: "center",
+            gap: 9,
+            padding: "0 18px",
           }}
         >
-          {address}
+          {colors.windowDots.map((color) => (
+            <div
+              key={color}
+              style={{ width: 13, height: 13, borderRadius: "50%", backgroundColor: color }}
+            />
+          ))}
+          <div
+            style={{
+              marginLeft: 14,
+              padding: "3px 18px",
+              borderRadius: 999,
+              backgroundColor: "#ffffff",
+              color: colors.windowBarText,
+              fontSize: 18,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {address}
+          </div>
         </div>
-      </div>
+      ) : null}
       {/* The page area. overflow hidden clips the pictures while they slide. */}
       <div style={{ position: "relative", overflow: "hidden", ...layout.content }}>{children}</div>
     </div>
   );
 };
 
-/** A screenshot filling the page area of the window. */
+/** A screenshot filling the page area. */
 const Screenshot: React.FC<{ file: string; shiftPercent: number; opacity: number }> = ({
   file,
   shiftPercent,
@@ -356,17 +415,36 @@ const Screenshot: React.FC<{ file: string; shiftPercent: number; opacity: number
   />
 );
 
-/** A ring that grows and fades at the click spot. */
-const Ripple: React.FC<{ at: number; x: number; y: number }> = ({ at, x, y }) => {
+/**
+ * Marks the click spot.
+ * "ripple": a ring that bursts outwards at the click and is gone.
+ * "ring": a steady ring that appears when the cursor arrives, gives a small
+ * squeeze at the click, and stays for a moment so the viewer can see
+ * exactly what was pressed.
+ */
+const ClickMark: React.FC<{ at: number; x: number; y: number }> = ({ at, x, y }) => {
   const frame = useCurrentFrame();
   const settings = useSettings();
-  const length = toFrames(settings.timing.rippleSeconds);
-  if (frame < at || frame > at + length) return null;
-  const progress = interpolate(frame, [at, at + length], [0, 1], {
-    ...CLAMP,
-    easing: Easing.out(Easing.cubic),
-  });
-  const size = settings.cursor.rippleSize * (0.25 + 0.75 * progress);
+  const { accent } = settings.colors;
+  const { markSize } = settings.cursor;
+
+  let size: number;
+  let opacity: number;
+  if (settings.look.clickMark === "ring") {
+    const from = toFrames(settings.timing.cursorGlideEnd);
+    const until = at + toFrames(settings.timing.ringHoldSeconds);
+    const fade = 6;
+    opacity = interpolate(frame, [from - fade, from, until, until + fade], [0, 1, 1, 0], CLAMP);
+    size = markSize * interpolate(frame, [at - 3, at, at + 6], [1, 0.82, 1], CLAMP);
+  } else {
+    const length = toFrames(settings.timing.rippleSeconds);
+    if (frame < at) return null;
+    const progress = interpolate(frame, [at, at + length], [0, 1], POP);
+    size = markSize * (0.25 + 0.75 * progress);
+    opacity = 1 - progress;
+  }
+  if (opacity <= 0) return null;
+
   return (
     <div
       style={{
@@ -376,24 +454,50 @@ const Ripple: React.FC<{ at: number; x: number; y: number }> = ({ at, x, y }) =>
         width: size,
         height: size,
         borderRadius: "50%",
-        border: `5px solid ${settings.colors.accent}`,
-        backgroundColor: "rgba(124, 108, 255, 0.22)",
-        opacity: 1 - progress,
+        border: `5px solid ${accent}`,
+        // "33" on the end of a hex colour makes it about 20 percent solid.
+        backgroundColor: `${accent}33`,
+        boxShadow: `0 0 24px ${accent}66`,
+        opacity,
       }}
     />
   );
 };
 
-/** Our own arrow cursor. The tip of the arrow sits exactly on x, y. */
+/**
+ * Our own cursor. "arrow": a mouse pointer whose tip sits exactly on x, y.
+ * "dot": a round touch marker centred on x, y.
+ */
 const Cursor: React.FC<{ x: number; y: number; clickAt: number | null }> = ({ x, y, clickAt }) => {
   const frame = useCurrentFrame();
   const settings = useSettings();
   const { size } = settings.cursor;
+  const { cursorFill, cursorEdge } = settings.colors;
   // A quick squeeze at the click moment makes the press feel physical.
   const press =
     clickAt === null
       ? 1
       : interpolate(frame, [clickAt - 3, clickAt, clickAt + 5], [1, 0.8, 1], CLAMP);
+
+  if (settings.look.cursorDesign === "dot") {
+    return (
+      <div
+        style={{
+          position: "absolute",
+          left: x - size / 2,
+          top: y - size / 2,
+          width: size,
+          height: size,
+          borderRadius: "50%",
+          backgroundColor: cursorFill,
+          border: `4px solid ${cursorEdge}`,
+          boxShadow: "0 6px 18px rgba(0, 0, 0, 0.45)",
+          transform: `scale(${press})`,
+        }}
+      />
+    );
+  }
+
   return (
     <svg
       viewBox="0 0 24 24"
@@ -411,8 +515,8 @@ const Cursor: React.FC<{ x: number; y: number; clickAt: number | null }> = ({ x,
     >
       <path
         d="M4 2 L4 19.5 L8.6 15.4 L11.6 22 L14.4 20.7 L11.5 14.3 L17.6 14 Z"
-        fill="#111111"
-        stroke="#ffffff"
+        fill={cursorFill}
+        stroke={cursorEdge}
         strokeWidth={1.5}
         strokeLinejoin="round"
       />
@@ -428,7 +532,7 @@ const TypingChip: React.FC<{
 }> = ({ text, typing, aspect }) => {
   const frame = useCurrentFrame();
   const settings = useSettings();
-  const fade = toFrames(settings.timing.softFadeSeconds);
+  const fade = fadeFrames(settings.timing.softFadeSeconds);
   const { fontSize, bottom } = settings.typingChip[aspect];
   // Appear just before the first letter, leave shortly after the last one.
   const opacity = interpolate(
@@ -465,7 +569,7 @@ const TypingChip: React.FC<{
             height: "1em",
             marginLeft: "0.08em",
             verticalAlign: "-0.12em",
-            backgroundColor: settings.colors.accent,
+            backgroundColor: settings.colors.typingText,
           }}
         />
       </span>
@@ -473,29 +577,179 @@ const TypingChip: React.FC<{
   );
 };
 
-/** Subtitle near the bottom of the frame. */
-const Caption: React.FC<{ text: string; aspect: Aspect }> = ({ text, aspect }) => {
+/** Picks the caption design of the active style. */
+const Caption: React.FC<{ text: string; aspect: Aspect; sceneFrames: number }> = (props) => {
+  const settings = useSettings();
+  const { captionDesign } = settings.look;
+  if (captionDesign === "bar") return <BarCaption {...props} />;
+  // The two large designs have no box behind the text. While the camera is
+  // zoomed in, a bright page can slide underneath them, so the bottom of the
+  // frame fades to dark to keep light text readable on any page.
+  const { fontSize, bottom } = settings.caption[props.aspect];
+  return (
+    <>
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          // Tall enough for two lines of caption plus a soft run-in above.
+          height: bottom + fontSize * 3.6,
+          background: "linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.78) 55%)",
+        }}
+      />
+      {captionDesign === "words" ? <WordsCaption {...props} /> : <HighlightCaption {...props} />}
+    </>
+  );
+};
+
+/**
+ * Trailer caption: big bold text with no box behind it. The words pop in
+ * one after another, spread over the first part of the scene.
+ */
+const WordsCaption: React.FC<{ text: string; aspect: Aspect; sceneFrames: number }> = ({
+  text,
+  aspect,
+  sceneFrames,
+}) => {
   const frame = useCurrentFrame();
   const settings = useSettings();
   const { fontSize, bottom } = settings.caption[aspect];
-  const opacity = interpolate(frame, [0, toFrames(settings.timing.softFadeSeconds)], [0, 1], CLAMP);
+  const words = text.split(/\s+/).filter(Boolean);
+  // Frames between one word and the next: slower for short captions in long
+  // scenes, but always between 2 and 7 so it never drags or blurs together.
+  const gap = Math.min(7, Math.max(2, Math.floor((sceneFrames * 0.4) / words.length)));
   return (
     <LowerThird bottom={bottom}>
-      <span
+      <div
         style={{
+          display: "flex",
+          flexWrap: "wrap",
+          justifyContent: "center",
+          gap: "0 0.28em",
           fontSize,
-          fontWeight: 600,
-          lineHeight: 1.25,
-          textAlign: "center",
-          opacity,
+          fontWeight: 800,
+          lineHeight: 1.1,
+          letterSpacing: "-0.01em",
+          textTransform: settings.look.captionUppercase ? "uppercase" : "none",
           color: settings.colors.captionText,
-          backgroundColor: settings.colors.captionBackground,
-          padding: "0.35em 0.8em",
-          borderRadius: "0.4em",
+          textShadow: "0 6px 28px rgba(0, 0, 0, 0.75), 0 2px 4px rgba(0, 0, 0, 0.6)",
         }}
       >
-        {text}
-      </span>
+        {words.map((word, position) => {
+          const pop = interpolate(frame, [position * gap, position * gap + 5], [0, 1], POP);
+          return (
+            // The position is part of the key because a word can repeat.
+            <span
+              key={`${position}-${word}`}
+              style={{
+                display: "inline-block",
+                opacity: pop,
+                transform: `translateY(${(1 - pop) * 28}px) scale(${0.8 + 0.2 * pop})`,
+              }}
+            >
+              {word}
+            </span>
+          );
+        })}
+      </div>
+    </LowerThird>
+  );
+};
+
+/**
+ * Tutorial caption: small text in a clean bar across the bottom of the
+ * frame. The bar itself never moves; only the text fades in.
+ * The "bottom" setting is extra space under the text inside the bar.
+ */
+const BarCaption: React.FC<{ text: string; aspect: Aspect }> = ({ text, aspect }) => {
+  const frame = useCurrentFrame();
+  const settings = useSettings();
+  const { fontSize, bottom } = settings.caption[aspect];
+  const opacity = interpolate(frame, [0, fadeFrames(settings.timing.softFadeSeconds)], [0, 1], CLAMP);
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: 0,
+        right: 0,
+        bottom: 0,
+        padding: `${fontSize * 0.75}px 60px ${fontSize * 0.75 + bottom}px`,
+        backgroundColor: settings.colors.captionBackground,
+        borderTop: `4px solid ${settings.colors.accent}`,
+        boxShadow: "0 -8px 30px rgba(40, 60, 100, 0.12)",
+        textAlign: "center",
+        fontSize,
+        fontWeight: 500,
+        lineHeight: 1.3,
+        textTransform: settings.look.captionUppercase ? "uppercase" : "none",
+        color: settings.colors.captionText,
+      }}
+    >
+      <span style={{ opacity }}>{text}</span>
+    </div>
+  );
+};
+
+/** Letters and digits only, for comparing word lengths without punctuation. */
+const bare = (word: string) => word.replace(/[^\p{L}\p{N}]/gu, "");
+
+/**
+ * Social caption: very large centred text. The key word gets a block of the
+ * accent colour behind it. The whole caption snaps in with a tiny pop.
+ */
+const HighlightCaption: React.FC<{ text: string; aspect: Aspect }> = ({ text, aspect }) => {
+  const frame = useCurrentFrame();
+  const settings = useSettings();
+  const { fontSize, bottom } = settings.caption[aspect];
+  const words = text.split(/\s+/).filter(Boolean);
+  // ponytail: the "key word" is simply the longest word (the first one when
+  // several tie). Good enough for short captions; have the script stage
+  // mark the key word if this picks badly.
+  const key = words.reduce(
+    (best, word, position) => (bare(word).length > bare(words[best]).length ? position : best),
+    0,
+  );
+  const pop = interpolate(frame, [0, 3], [0.9, 1], POP);
+  return (
+    <LowerThird bottom={bottom}>
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          justifyContent: "center",
+          gap: "0.12em 0.26em",
+          fontSize,
+          fontWeight: 900,
+          lineHeight: 1.05,
+          textTransform: settings.look.captionUppercase ? "uppercase" : "none",
+          color: settings.colors.captionText,
+          textShadow: "0 6px 26px rgba(0, 0, 0, 0.8), 0 2px 4px rgba(0, 0, 0, 0.7)",
+          transform: `scale(${pop})`,
+        }}
+      >
+        {words.map((word, position) => (
+          <span
+            key={`${position}-${word}`}
+            style={
+              position === key
+                ? {
+                    display: "inline-block",
+                    padding: "0.02em 0.18em",
+                    borderRadius: "0.1em",
+                    backgroundColor: settings.colors.accent,
+                    color: settings.colors.onAccent,
+                    textShadow: "none",
+                    transform: "rotate(-2deg)",
+                  }
+                : { display: "inline-block" }
+            }
+          >
+            {word}
+          </span>
+        ))}
+      </div>
     </LowerThird>
   );
 };
@@ -520,7 +774,38 @@ const LowerThird: React.FC<{ bottom: number; children: React.ReactNode }> = ({
   </div>
 );
 
-/** Full-screen card with a big line and a smaller line. Used at both ends. */
+/** A thin bar across the top that fills from left to right as the video plays. */
+const ProgressBar: React.FC<{ totalFrames: number }> = ({ totalFrames }) => {
+  const frame = useCurrentFrame();
+  const settings = useSettings();
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: 0,
+        top: 0,
+        right: 0,
+        height: 14,
+        backgroundColor: "rgba(255, 255, 255, 0.22)",
+      }}
+    >
+      <div
+        style={{
+          width: `${(100 * (frame + 1)) / totalFrames}%`,
+          height: "100%",
+          backgroundColor: settings.colors.accent,
+        }}
+      />
+    </div>
+  );
+};
+
+/**
+ * Full-screen card with a big line and a smaller line. Used at both ends.
+ * "bold" design: huge capital letters that land with a slight zoom, over a
+ * thick accent stroke. "simple" design: a modest title under a short accent
+ * line, with a plain fade.
+ */
 const Card: React.FC<{
   title: string;
   subtitle: string;
@@ -533,15 +818,28 @@ const Card: React.FC<{
 }> = ({ title, subtitle, strongSubtitle, smallTitle, frames, aspect }) => {
   const frame = useCurrentFrame();
   const settings = useSettings();
-  const fade = toFrames(settings.timing.softFadeSeconds);
+  const bold = settings.look.cardDesign === "bold";
+  const fade = fadeFrames(settings.timing.softFadeSeconds);
   const { subtitleSize } = settings.cards[aspect];
   const titleSize = settings.cards[aspect].titleSize * (smallTitle ? 0.6 : 1);
   const opacity = interpolate(frame, [0, fade, frames - fade, frames], [0, 1, 1, 0], CLAMP);
-  // The text rises a little as it appears.
-  const rise = interpolate(frame, [0, fade * 2], [30, 0], {
-    ...CLAMP,
-    easing: Easing.out(Easing.cubic),
-  });
+  const arrive = interpolate(frame, [0, 10], [0, 1], POP);
+  // Bold cards land from slightly too big. Simple cards rise a little.
+  const transform = bold
+    ? `scale(${1.18 - 0.18 * arrive})`
+    : `translateY(${(1 - arrive) * 24}px)`;
+  const accentLine = (
+    <div
+      style={{
+        // The stroke of a bold card grows out from the left as it lands.
+        width: bold ? titleSize * 1.6 * arrive : titleSize,
+        height: bold ? titleSize * 0.09 : 6,
+        borderRadius: 999,
+        backgroundColor: settings.colors.accent,
+        margin: bold ? `${titleSize * 0.16}px 0 0` : `0 0 ${titleSize * 0.4}px`,
+      }}
+    />
+  );
   return (
     <AbsoluteFill
       style={{
@@ -550,26 +848,30 @@ const Card: React.FC<{
         textAlign: "center",
         padding: "0 80px",
         opacity,
-        transform: `translateY(${rise}px)`,
+        transform,
         overflowWrap: "anywhere",
       }}
     >
+      {bold ? null : accentLine}
       {title ? (
         <div
           style={{
             fontSize: titleSize,
-            fontWeight: 700,
-            lineHeight: 1.1,
+            fontWeight: bold ? 900 : 600,
+            lineHeight: 1.05,
+            letterSpacing: bold ? "-0.03em" : "0",
+            textTransform: bold ? "uppercase" : "none",
             color: settings.colors.cardTitle,
           }}
         >
           {title}
         </div>
       ) : null}
+      {bold ? accentLine : null}
       {subtitle ? (
         <div
           style={{
-            marginTop: titleSize * 0.35,
+            marginTop: titleSize * 0.3,
             fontSize: subtitleSize * (strongSubtitle ? 1.2 : 1),
             fontWeight: strongSubtitle ? 600 : 400,
             lineHeight: 1.3,
@@ -599,7 +901,7 @@ const Badge: React.FC<{ number: number; total: number; aspect: Aspect }> = ({
         top,
         fontSize,
         fontWeight: 700,
-        color: "#ffffff",
+        color: settings.colors.onAccent,
         backgroundColor: settings.colors.accent,
         padding: "0.3em 0.8em",
         borderRadius: 999,
@@ -621,7 +923,7 @@ const RecapCard: React.FC<{
 }> = ({ heading, lines, address, frames, aspect }) => {
   const frame = useCurrentFrame();
   const settings = useSettings();
-  const fade = toFrames(settings.timing.softFadeSeconds);
+  const fade = fadeFrames(settings.timing.softFadeSeconds);
   const { headingSize } = settings.recap[aspect];
   const { height } = settings.sizes[aspect];
   const opacity = interpolate(frame, [0, fade, frames - fade, frames], [0, 1, 1, 0], CLAMP);
@@ -673,6 +975,7 @@ const RecapCard: React.FC<{
                   height: "1.6em",
                   borderRadius: "50%",
                   backgroundColor: settings.colors.accent,
+                  color: settings.colors.onAccent,
                   display: "flex",
                   justifyContent: "center",
                   alignItems: "center",
