@@ -104,24 +104,21 @@ function CostPanel({ summary }: { summary: CostSummary }) {
                   <td>{stage.calls}</td>
                   <td>{stage.costUsd === null ? "not available" : formatMoney(stage.costUsd)}</td>
                 </tr>
-                <tr className={styles.costTableNotes}>
-                  <td colSpan={3}>
-                    <span>Times: calls at this stage.</span>
-                    <span>
-                      {stage.costUsd === null
-                        ? "Cost: no price available."
-                        : "Cost: total price for this stage."}
-                    </span>
-                    {stage.unknown && stage.costUsd !== null && (
+                {stage.unknown && stage.costUsd !== null && (
+                  <tr className={styles.costTableNotes}>
+                    <td colSpan={3}>
                       <span>Some calls have no reported price.</span>
-                    )}
-                  </td>
-                </tr>
+                    </td>
+                  </tr>
+                )}
               </Fragment>
             ))}
           </tbody>
         </table>
       </div>
+      <p className={styles.costNumberNote}>
+        Times: how many AI calls this stage made. Cost: what they cost.
+      </p>
 
       {summary.voice && (
         <div className={styles.costVoice}>
@@ -137,31 +134,26 @@ function CostPanel({ summary }: { summary: CostSummary }) {
       <details className={styles.costDetails}>
         <summary>Show details</summary>
         <div className={styles.costDetailsList}>
+          <p className={styles.costExplanation}>
+            Which models answered, which routing tier they used, and how much text they read and wrote.
+          </p>
           {summary.modelStages.map((stage) => (
             <section className={styles.costDetail} key={stage.label}>
               <h3 className={styles.costDetailTitle}>{stage.label}</h3>
               <p className={styles.costDetailLine}>
                 <strong>Models:</strong> {stage.models.length ? stage.models.join(", ") : "Not recorded"}
               </p>
-              <p className={styles.costNumberNote}>Names of the models used for this stage.</p>
               <p className={styles.costDetailLine}>
                 <strong>Tiers:</strong> {stage.tiers.length ? stage.tiers.join(", ") : "Not recorded"}
               </p>
-              <p className={styles.costNumberNote}>Routing choices used for this stage.</p>
               <p className={styles.costDetailLine}>
                 <strong>Tokens in/out:</strong>{" "}
                 {stage.inputTokens.toLocaleString()} / {stage.outputTokens.toLocaleString()}
               </p>
-              <p className={styles.costNumberNote}>Amounts of text processed for this stage.</p>
               {stage.cacheHits > 0 && (
-                <div className={styles.costBadgeGroup}>
-                  <span className={styles.costBadge}>
-                    Reused{stage.cacheHits > 1 ? ` (${stage.cacheHits})` : ""}
-                  </span>
-                  {stage.cacheHits > 1 && (
-                    <p className={styles.costNumberNote}>Work was reused this many times in this stage.</p>
-                  )}
-                </div>
+                <span className={styles.costBadge}>
+                  Reused{stage.cacheHits > 1 ? ` (${stage.cacheHits})` : ""}
+                </span>
               )}
               {Array.from({ length: stage.escalations }, (_, index) => (
                 <span
