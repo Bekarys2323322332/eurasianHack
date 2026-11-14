@@ -17,7 +17,8 @@
     "test": "vitest run",
     "validate:fixture": "tsx scripts/validate-step-file.ts fixtures/fake-job/steps.json",
     "typecheck": "tsc --noEmit",
-    "render": "tsx src/renderer/cli.ts"
+    "render": "tsx src/renderer/cli.ts",
+    "voice": "tsx src/voice/cli.ts"
   },
   "dependencies": {
     "@remotion/bundler": "^4.0.543",
