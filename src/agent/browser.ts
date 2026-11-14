@@ -158,6 +158,9 @@ export async function extractVisibleText(page: Page): Promise<string> {
  */
 export async function extractInteractiveElements(page: Page): Promise<InteractiveElement[]> {
   return page.evaluate(() => {
+    document
+      .querySelectorAll("[data-agent-element]")
+      .forEach((node) => node.removeAttribute("data-agent-element"));
     const selector =
       'a[href],button,input,textarea,select,[role="button"],[role="link"],[onclick]';
     const elements: InteractiveElement[] = [];

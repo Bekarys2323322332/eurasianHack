@@ -68,6 +68,30 @@ describe("browser helpers", () => {
     expect(await page.locator('[data-agent-element="2"]').count()).toBe(1);
   });
 
+  it("removes stale tags before numbering controls after a scroll", async () => {
+    const buttons = Array.from(
+      { length: 40 },
+      (_, index) =>
+        `<button style="display:block;width:100%;height:80px">Control ${index + 1}</button>`,
+    ).join("");
+    await page.setContent(`<main>${buttons}</main>`);
+    await extractInteractiveElements(page);
+    await page.evaluate(() => window.scrollTo(0, 1_800));
+    await page.waitForTimeout(50);
+
+    const elements = await extractInteractiveElements(page);
+    const tags = await page
+      .locator("[data-agent-element]")
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-agent-element")));
+
+    expect(elements.length).toBeGreaterThan(0);
+    expect(tags).toHaveLength(elements.length);
+    expect(new Set(tags).size).toBe(tags.length);
+    for (const tag of tags) {
+      expect(await page.locator(`[data-agent-element="${tag}"]`).count()).toBe(1);
+    }
+  });
+
   it("detects a captcha iframe and human-verification copy", async () => {
     await page.setContent('<iframe title="reCAPTCHA challenge"></iframe>');
     expect(await detectLoginWall(page)).toBe(true);
