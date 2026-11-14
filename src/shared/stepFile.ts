@@ -50,6 +50,16 @@ export const stepSchema = z.object({
   audioSeconds: z.number().nonnegative().nullable(),
   /** True when the user removed the step in the editor. */
   hidden: z.boolean(),
+  /** Seconds from action start until the page finished loading. */
+  loadSeconds: z.number().nonnegative().optional(),
+  /** Number of times the browser action was tried. */
+  attempts: z.number().int().positive().optional(),
+  /** Which options the agent was unsure how to choose between. */
+  confusion: z.string().nullable().optional(),
+  /** Browser errors observed while the agent handled this step. */
+  errors: z.array(z.string()).optional(),
+  /** Why a dead-end step did nothing, in plain words. */
+  deadendReason: z.string().nullable().optional(),
 });
 
 export const stepFileSchema = z.object({
@@ -69,6 +79,10 @@ export const stepFileSchema = z.object({
   }),
   /** Shown on the title card. */
   title: z.string(),
+  /** False when the agent could not finish the goal honestly. Missing means unknown. */
+  goalAchieved: z.boolean().optional(),
+  /** What the agent reached, or why it stopped. */
+  resultText: z.string().nullable().optional(),
   steps: z.array(stepSchema),
 });
 

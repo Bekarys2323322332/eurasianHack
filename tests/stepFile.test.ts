@@ -13,6 +13,24 @@ describe("validateStepFile", () => {
     expect(result.stepFile.steps).toHaveLength(5);
   });
 
+  it("accepts optional findings metadata while older files remain valid", () => {
+    const data = loadFixture();
+    data.steps[0].loadSeconds = 4.2;
+    data.steps[0].attempts = 2;
+    data.steps[0].confusion = "Two links looked similar";
+    data.steps[0].errors = ["HTTP 500: https://example.com/data"];
+
+    const result = validateStepFile(data);
+    if (!result.ok) throw new Error(result.errors.join("\n"));
+    expect(result.stepFile.steps[0]).toMatchObject({
+      loadSeconds: 4.2,
+      attempts: 2,
+      confusion: "Two links looked similar",
+      errors: ["HTTP 500: https://example.com/data"],
+    });
+    expect(validateStepFile(loadFixture()).ok).toBe(true);
+  });
+
   it("points at screenshots that exist in the fixture", () => {
     const result = validateStepFile(loadFixture());
     if (!result.ok) throw new Error(result.errors.join("\n"));

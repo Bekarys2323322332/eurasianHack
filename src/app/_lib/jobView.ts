@@ -7,6 +7,9 @@ import path from "node:path";
 import { getJob, getJobDir, type Job } from "../../shared/jobs";
 import { validateStepFile, type StepFile } from "../../shared/stepFile";
 import type { AgentCostFile } from "../../agent/cost";
+import { findingsReportSchema, type FindingsReport } from "../../findings/findings";
+import { FPS, settingsFor } from "../../renderer/settings";
+import { buildTimeline } from "../../renderer/timeline";
 import { summarizeCost, type CostSummary } from "./costView";
 import { queuePosition, resumePendingJobs } from "./pipeline";
 
@@ -17,6 +20,8 @@ export interface JobView {
   videos: { landscape: string | null; vertical: string | null };
   thumbnail: string | null;
   cost: CostSummary | null;
+  findings: FindingsReport | null;
+  sceneStarts: Record<string, number>;
   /** Place in line while waiting (1 = next), otherwise 0. */
   queuePosition: number;
 }
@@ -57,6 +62,19 @@ function readCost(jobId: string): CostSummary | null {
   }
 }
 
+/** Read a validated findings report when one was written successfully. */
+function readFindings(jobId: string): FindingsReport | null {
+  const file = path.join(getJobDir(jobId), "findings.json");
+  if (!fs.existsSync(file)) return null;
+
+  try {
+    const report = findingsReportSchema.safeParse(JSON.parse(fs.readFileSync(file, "utf8")));
+    return report.success ? report.data : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Build the job view, or null if the job does not exist. */
 export function getJobView(jobId: string): JobView | null {
   if (!isJobId(jobId)) return null;
@@ -74,13 +92,28 @@ export function getJobView(jobId: string): JobView | null {
     firstShown && fs.existsSync(path.join(dir, firstShown.screenshotAfter))
       ? jobFileUrl(jobId, firstShown.screenshotAfter)
       : null;
+  const videos = {
+    landscape: fileIfExists("video-16x9.mp4"),
+    vertical: fileIfExists("video-9x16.mp4"),
+  };
+  const aspect = videos.landscape ? "16:9" : videos.vertical ? "9:16" : null;
+  const selectedVideo = aspect === "9:16" ? videos.vertical : videos.landscape;
+  const sceneStarts: Record<string, number> = {};
+  if (stepFile && selectedVideo) {
+    const timeline = buildTimeline(stepFile, settingsFor(job.style));
+    for (const scene of timeline.scenes) {
+      sceneStarts[scene.step.id] = scene.from / FPS;
+    }
+  }
 
   return {
     job,
     stepFile,
-    videos: { landscape: fileIfExists("video-16x9.mp4"), vertical: fileIfExists("video-9x16.mp4") },
+    videos,
     thumbnail,
     cost: readCost(jobId),
+    findings: readFindings(jobId),
+    sceneStarts,
     queuePosition: queuePosition(jobId),
   };
 }

@@ -44,6 +44,7 @@ function stageLabel(stage: string): string {
   if (stage === "planner") return "Planning";
   if (stage.startsWith("agent-step-")) return "Exploring the site";
   if (stage === "script") return "Writing the script";
+  if (stage === "findings") return "Writing up what we found";
   return stage;
 }
 

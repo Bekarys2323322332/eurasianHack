@@ -28,6 +28,7 @@ describe("job store", () => {
   it("creates, updates and reads a job", () => {
     const columns = getDb().pragma("table_info(jobs)") as { name: string }[];
     expect(columns.map(({ name }) => name)).toContain("style");
+    expect(columns.map(({ name }) => name)).toContain("audience");
 
     const job = createJob({ mode: "howto", url: "https://example.com", goal: "Create an invoice" });
     expect(job.status).toBe("queued");
@@ -47,12 +48,21 @@ describe("job store", () => {
     const demo = createJob({ mode: "demo", url: "https://example.com" });
     const howto = createJob({ mode: "howto", url: "https://example.com" });
     const social = createJob({ mode: "demo", style: "social", url: "https://example.com" });
+    const investor = createJob({
+      mode: "demo",
+      audience: "investor",
+      url: "https://example.com",
+    });
 
     expect(demo.style).toBe("trailer");
     expect(howto.style).toBe("tutorial");
     expect(social.style).toBe("social");
+    expect(demo.audience).toBe("new-user");
+    expect(investor.audience).toBe("investor");
 
     getDb().prepare("UPDATE jobs SET style = NULL WHERE id = ?").run(demo.id);
+    getDb().prepare("UPDATE jobs SET audience = NULL WHERE id = ?").run(demo.id);
     expect(getJob(demo.id)?.style).toBe("trailer");
+    expect(getJob(demo.id)?.audience).toBe("new-user");
   });
 });

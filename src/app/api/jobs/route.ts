@@ -1,7 +1,7 @@
 /**
  * POST /api/jobs creates a job and puts it in the queue.
  *
- * Body: { mode: "demo" | "howto", url, repoUrl?, goal?, language?, style? }
+ * Body: { mode: "demo" | "howto", url, repoUrl?, goal?, language?, style?, audience? }
  * Reply: 201 { id } or 400 { error } with a plain sentence for the form.
  */
 import { z } from "zod";
@@ -33,6 +33,7 @@ const bodySchema = z.object({
   goal: z.string().trim().max(500).optional().nullable(),
   language: z.string().trim().min(2).max(10).default("en"),
   style: z.enum(["trailer", "tutorial", "social"]).optional(),
+  audience: z.enum(["new-user", "investor", "developer"]).optional(),
 });
 
 export async function POST(request: Request) {
@@ -52,6 +53,8 @@ export async function POST(request: Request) {
         "That does not look like a web address. It should start with https:// like https://example.com";
     } else if (field === "style") {
       error = "That video style is not supported. Choose trailer, tutorial, or social.";
+    } else if (field === "audience") {
+      error = "That audience is not supported. Choose new user, investor, or developer.";
     }
     return Response.json({ error }, { status: 400 });
   }
@@ -93,6 +96,7 @@ export async function POST(request: Request) {
   const job = createJob({
     mode,
     style: parsed.data.style,
+    audience: parsed.data.audience,
     url: new URL(url).toString(),
     repoUrl,
     goal,

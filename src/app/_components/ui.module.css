@@ -108,7 +108,7 @@
 
 .modeText {
   color: var(--muted);
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.4;
 }
 
@@ -145,12 +145,12 @@
 
 .fieldHint {
   color: var(--warning);
-  font-size: 15px;
+  font-size: 16px;
 }
 
 .fieldNote {
   color: var(--muted);
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.5;
 }
 
@@ -243,14 +243,14 @@
 
 .examplesLabel {
   color: var(--muted);
-  font-size: 15px;
+  font-size: 16px;
 }
 
 .chip {
   min-height: 44px;
   padding: 0 14px;
   font: inherit;
-  font-size: 15px;
+  font-size: 16px;
   color: var(--foreground);
   background: transparent;
   border: 1px solid var(--border);
@@ -282,7 +282,7 @@
 .howNumber {
   color: var(--accent);
   font-weight: 700;
-  font-size: 15px;
+  font-size: 16px;
 }
 
 .howTitle {
@@ -292,7 +292,7 @@
 
 .howText {
   color: var(--muted);
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.5;
 }
 
@@ -459,6 +459,14 @@
   border: 1px solid var(--border);
 }
 
+.videoVertical {
+  width: auto;
+  max-width: 100%;
+  height: min(80vh, 720px);
+  aspect-ratio: 9 / 16;
+  align-self: center;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -469,6 +477,21 @@
 .actions .secondary {
   margin-top: 0;
   flex: 1 1 180px;
+}
+
+.audienceCut {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.audienceCutLabel {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.audienceCut .secondary {
+  margin-top: 0;
 }
 
 .panels {
@@ -496,6 +519,81 @@
   color: var(--muted);
   font-size: 16px;
   line-height: 1.5;
+}
+
+.findingsSummary {
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.findingsList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.findingCard {
+  display: grid;
+  grid-template-columns: minmax(0, 108px) minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px;
+  color: var(--foreground);
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.findingCard:hover,
+.findingCard:focus-visible {
+  border-color: var(--accent);
+}
+
+.findingScreenshot {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.findingCardText {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  min-width: 0;
+}
+
+.findingSeverity,
+.findingStep {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.findingDescription {
+  font-size: 16px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.findingsCopy {
+  width: 100%;
+  margin-top: 0;
+}
+
+.audienceDescription {
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.4;
 }
 
 .costPanel {

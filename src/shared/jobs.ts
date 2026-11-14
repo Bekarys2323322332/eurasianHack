@@ -12,6 +12,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { defaultStyle, type Style } from "../renderer/settings";
+import { DEFAULT_AUDIENCE, type Audience } from "../shared/audiences";
 import type { JobMode } from "./stepFile";
 
 /** Every stage a job moves through, in order. "failed" can happen at any point. */
@@ -32,6 +33,7 @@ export interface Job {
   id: string;
   mode: JobMode;
   style: Style;
+  audience: Audience;
   url: string;
   repoUrl: string | null;
   goal: string | null;
@@ -46,6 +48,7 @@ export interface Job {
 export interface NewJob {
   mode: JobMode;
   style?: Style;
+  audience?: Audience;
   url: string;
   repoUrl?: string | null;
   goal?: string | null;
@@ -81,6 +84,7 @@ export function getDb(): Database.Database {
       id              TEXT PRIMARY KEY,
       mode            TEXT NOT NULL,
       style           TEXT,
+      audience        TEXT,
       url             TEXT NOT NULL,
       repoUrl         TEXT,
       goal            TEXT,
@@ -95,6 +99,9 @@ export function getDb(): Database.Database {
   if (!columns.some(({ name }) => name === "style")) {
     db.exec("ALTER TABLE jobs ADD COLUMN style TEXT");
   }
+  if (!columns.some(({ name }) => name === "audience")) {
+    db.exec("ALTER TABLE jobs ADD COLUMN audience TEXT");
+  }
 
   globalForDb.__jobsDb = db;
   return db;
@@ -106,6 +113,7 @@ export function createJob(input: NewJob): Job {
     id: randomUUID().replace(/-/g, "").slice(0, 12),
     mode: input.mode,
     style: input.style ?? defaultStyle(input.mode),
+    audience: input.audience ?? DEFAULT_AUDIENCE,
     url: input.url,
     repoUrl: input.repoUrl ?? null,
     goal: input.goal ?? null,
@@ -117,8 +125,8 @@ export function createJob(input: NewJob): Job {
 
   getDb()
     .prepare(
-      `INSERT INTO jobs (id, mode, style, url, repoUrl, goal, language, status, progressMessage, createdAt)
-       VALUES (@id, @mode, @style, @url, @repoUrl, @goal, @language, @status, @progressMessage, @createdAt)`,
+      `INSERT INTO jobs (id, mode, style, audience, url, repoUrl, goal, language, status, progressMessage, createdAt)
+       VALUES (@id, @mode, @style, @audience, @url, @repoUrl, @goal, @language, @status, @progressMessage, @createdAt)`,
     )
     .run(job);
 
@@ -144,11 +152,18 @@ export function listJobs(options: { status?: JobStatus; limit?: number } = {}): 
   return rows.map(fromJobRow);
 }
 
-type JobRow = Omit<Job, "style"> & { style: Style | null };
+type JobRow = Omit<Job, "style" | "audience"> & {
+  style: Style | null;
+  audience: Audience | null;
+};
 
-/** Fill the style on rows created before style preferences were stored. */
+/** Fill preferences on rows created before style or audience were stored. */
 function fromJobRow(row: JobRow): Job {
-  return { ...row, style: row.style ?? defaultStyle(row.mode) };
+  return {
+    ...row,
+    style: row.style ?? defaultStyle(row.mode),
+    audience: row.audience ?? DEFAULT_AUDIENCE,
+  };
 }
 
 /** Fields that may change after a job is created. */
