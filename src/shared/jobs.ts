@@ -38,6 +38,8 @@ export interface Job {
   repoUrl: string | null;
   goal: string | null;
   language: string;
+  /** Set when this job reuses another job's steps (another language) instead of running the agent. */
+  sourceJobId: string | null;
   status: JobStatus;
   /** Plain-words message shown in the progress view, e.g. "Exploring the site". */
   progressMessage: string | null;
@@ -53,6 +55,7 @@ export interface NewJob {
   repoUrl?: string | null;
   goal?: string | null;
   language?: string;
+  sourceJobId?: string | null;
 }
 
 /** Root folder for all runtime data. Defaults to ./data. */
@@ -85,6 +88,7 @@ export function getDb(): Database.Database {
       mode            TEXT NOT NULL,
       style           TEXT,
       audience        TEXT,
+      sourceJobId     TEXT,
       url             TEXT NOT NULL,
       repoUrl         TEXT,
       goal            TEXT,
@@ -98,6 +102,9 @@ export function getDb(): Database.Database {
   const columns = db.pragma("table_info(jobs)") as { name: string }[];
   if (!columns.some(({ name }) => name === "style")) {
     db.exec("ALTER TABLE jobs ADD COLUMN style TEXT");
+  }
+  if (!columns.some(({ name }) => name === "sourceJobId")) {
+    db.exec("ALTER TABLE jobs ADD COLUMN sourceJobId TEXT");
   }
   if (!columns.some(({ name }) => name === "audience")) {
     db.exec("ALTER TABLE jobs ADD COLUMN audience TEXT");
@@ -118,6 +125,7 @@ export function createJob(input: NewJob): Job {
     repoUrl: input.repoUrl ?? null,
     goal: input.goal ?? null,
     language: input.language ?? "en",
+    sourceJobId: input.sourceJobId ?? null,
     status: "queued",
     progressMessage: "Waiting to start",
     createdAt: new Date().toISOString(),
@@ -125,8 +133,8 @@ export function createJob(input: NewJob): Job {
 
   getDb()
     .prepare(
-      `INSERT INTO jobs (id, mode, style, audience, url, repoUrl, goal, language, status, progressMessage, createdAt)
-       VALUES (@id, @mode, @style, @audience, @url, @repoUrl, @goal, @language, @status, @progressMessage, @createdAt)`,
+      `INSERT INTO jobs (id, mode, style, audience, url, repoUrl, goal, language, sourceJobId, status, progressMessage, createdAt)
+       VALUES (@id, @mode, @style, @audience, @url, @repoUrl, @goal, @language, @sourceJobId, @status, @progressMessage, @createdAt)`,
     )
     .run(job);
 
@@ -152,9 +160,10 @@ export function listJobs(options: { status?: JobStatus; limit?: number } = {}): 
   return rows.map(fromJobRow);
 }
 
-type JobRow = Omit<Job, "style" | "audience"> & {
+type JobRow = Omit<Job, "style" | "audience" | "sourceJobId"> & {
   style: Style | null;
   audience: Audience | null;
+  sourceJobId?: string | null;
 };
 
 /** Fill preferences on rows created before style or audience were stored. */
@@ -163,6 +172,7 @@ function fromJobRow(row: JobRow): Job {
     ...row,
     style: row.style ?? defaultStyle(row.mode),
     audience: row.audience ?? DEFAULT_AUDIENCE,
+    sourceJobId: row.sourceJobId ?? null,
   };
 }
 

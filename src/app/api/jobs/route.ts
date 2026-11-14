@@ -1,14 +1,15 @@
 /**
  * POST /api/jobs creates a job and puts it in the queue.
  *
- * Body: { mode: "demo" | "howto", url, repoUrl?, goal?, language?, style?, audience? }
+ * Body: { mode: "demo" | "howto", url, repoUrl?, goal?, language?, style?, audience?, sourceJobId? }
  * Reply: 201 { id } or 400 { error } with a plain sentence for the form.
  */
 import { z } from "zod";
-import { createJob } from "../../../shared/jobs";
+import { createJob, getJob, getJobDir } from "../../../shared/jobs";
 import { JOB_MODES } from "../../../shared/stepFile";
 import { LANGUAGES } from "../../../voice/config";
 import { enqueueJob, isQueueFull } from "../../_lib/pipeline";
+import { ReuseStepsError, readReusableStepFile } from "../../_lib/reuseSteps";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,6 +35,8 @@ const bodySchema = z.object({
   language: z.string().trim().min(2).max(10).default("en"),
   style: z.enum(["trailer", "tutorial", "social"]).optional(),
   audience: z.enum(["new-user", "investor", "developer"]).optional(),
+  /** A finished job whose steps are reused for another language (no agent run). */
+  sourceJobId: z.string().regex(/^[a-z0-9-]{1,64}$/).optional().nullable(),
 });
 
 export async function POST(request: Request) {
@@ -86,6 +89,24 @@ export async function POST(request: Request) {
     );
   }
 
+  const sourceJobId = parsed.data.sourceJobId || null;
+  if (sourceJobId) {
+    const source = getJob(sourceJobId);
+    if (!source || source.status !== "done") {
+      return Response.json(
+        { error: "The original video is not finished yet, so it cannot be made in another language." },
+        { status: 400 },
+      );
+    }
+    try {
+      readReusableStepFile(getJobDir(sourceJobId));
+    } catch (error) {
+      const message =
+        error instanceof ReuseStepsError ? error.message : "The original video's steps could not be read.";
+      return Response.json({ error: message }, { status: 400 });
+    }
+  }
+
   if (isQueueFull()) {
     return Response.json(
       { error: "Too many videos are being made right now. Please try again in a few minutes." },
@@ -101,6 +122,7 @@ export async function POST(request: Request) {
     repoUrl,
     goal,
     language,
+    sourceJobId,
   });
   enqueueJob(job.id);
   return Response.json({ id: job.id }, { status: 201 });
