@@ -585,6 +585,32 @@
   overflow-wrap: anywhere;
 }
 
+.findingCard:disabled {
+  cursor: default;
+}
+
+.stepDeadend {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.stepAction {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.resultText {
+  font-size: 18px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.findingsList li {
+  list-style: none;
+}
+
 .findingsCopy {
   width: 100%;
   margin-top: 0;

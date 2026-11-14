@@ -13,6 +13,7 @@ import { useRouter } from "next/navigation";
 import { Fragment, useEffect, useId, useRef, useState } from "react";
 import { AUDIENCES, type Audience } from "../../shared/audiences";
 import type { JobView } from "../_lib/jobView";
+import type { Step, StepFile } from "../../shared/stepFile";
 import type { CostSummary } from "../_lib/costView";
 import { toPublicUrl } from "../../shared/publicUrl";
 import styles from "./ui.module.css";
@@ -186,6 +187,101 @@ const SEVERITY_LABELS = {
 function findingScreenshotUrl(jobId: string, screenshot: string): string {
   const encodedPath = screenshot.split("/").map(encodeURIComponent).join("/");
   return `/api/jobs/${jobId}/files/${encodedPath}`;
+}
+
+const MAX_STEPS_SHOWN = 6;
+
+/** The agent's reasons can run to a paragraph; show the first sentence, trimmed. */
+function shortReason(text: string): string {
+  const firstSentence = text.trim().match(/^[^.!?]*[.!?]?/)?.[0]?.trim() ?? text.trim();
+  return firstSentence.length > 140 ? `${firstSentence.slice(0, 137).trimEnd()}...` : firstSentence;
+}
+
+const ACTION_LABELS: Record<Step["action"], (step: Step) => string> = {
+  click: (step) => `Clicked "${step.target}"`,
+  type: (step) => `Typed into "${step.target}"`,
+  scroll: (step) => `Scrolled ${step.target ? `to "${step.target}"` : "the page"}`,
+  navigate: (step) => `Opened ${step.target || "the page"}`,
+  wait: () => "Waited for the page",
+};
+
+function StepsPanel({
+  jobId,
+  stepFile,
+  onSelect,
+}: {
+  jobId: string;
+  stepFile: StepFile | null;
+  onSelect: ((step: Step) => void) | null;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const steps = stepFile?.steps.filter((step) => !step.hidden) ?? [];
+  const deadends = steps.filter((step) => step.status === "deadend").length;
+  const shown = showAll ? steps : steps.slice(0, MAX_STEPS_SHOWN);
+  return (
+    <section className={styles.panel} aria-labelledby="steps-title">
+      <h2 id="steps-title" className={styles.panelTitle}>
+        Steps
+      </h2>
+      {steps.length === 0 ? (
+        <p className={styles.panelEmpty}>
+          Each step the agent took will appear here, with a picture and the reason for it.
+        </p>
+      ) : (
+        <>
+          <p className={styles.findingsSummary}>
+            {steps.length} {steps.length === 1 ? "step" : "steps"}
+            {deadends > 0 && `, ${deadends} ${deadends === 1 ? "dead end" : "dead ends"}`}
+            {onSelect && ". Click a step to watch it."}
+          </p>
+          <ol className={styles.findingsList}>
+            {shown.map((step) => {
+              const seekable = onSelect !== null && step.status === "ok";
+              return (
+                <li key={step.id}>
+                  <button
+                    type="button"
+                    className={styles.findingCard}
+                    onClick={seekable ? () => onSelect(step) : undefined}
+                    disabled={!seekable}
+                  >
+                    <Image
+                      className={styles.findingScreenshot}
+                      src={findingScreenshotUrl(jobId, step.screenshotAfter)}
+                      alt={`Screenshot after step ${step.index}`}
+                      width={160}
+                      height={90}
+                    />
+                    <span className={styles.findingCardText}>
+                      <span className={styles.findingStep}>
+                        Step {step.index}
+                        {step.status === "deadend" && (
+                          <span className={styles.stepDeadend}> Dead end</span>
+                        )}
+                      </span>
+                      <span className={styles.stepAction}>{ACTION_LABELS[step.action](step)}</span>
+                      <span className={styles.findingDescription}>
+                        {shortReason(
+                          step.status === "deadend" && step.deadendReason?.trim()
+                            ? step.deadendReason
+                            : step.reason,
+                        )}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+          {shown.length < steps.length && (
+            <button type="button" className={styles.secondaryLink} onClick={() => setShowAll(true)}>
+              Show all {steps.length} steps
+            </button>
+          )}
+        </>
+      )}
+    </section>
+  );
 }
 
 function WhatWeFoundPanel({
@@ -385,15 +481,19 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
   }
 
   function selectFinding(finding: FindingItem) {
+    seekToStep(finding.stepId, finding.stepIndex);
+  }
+
+  function seekToStep(stepId: string, stepIndex: number) {
     const video = videoRef.current;
     if (!video) return;
 
-    let sceneStart = view.sceneStarts[finding.stepId];
+    let sceneStart = view.sceneStarts[stepId];
     if (sceneStart === undefined) {
       const precedingStep = view.stepFile?.steps
         .filter(
           (step) =>
-            step.index < finding.stepIndex &&
+            step.index < stepIndex &&
             view.sceneStarts[step.id] !== undefined,
         )
         .sort((left, right) => right.index - left.index)[0];
@@ -463,8 +563,9 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
             {view.stepFile.resultText?.trim() || "The AI visitor explored the page but could not finish the goal."}
           </p>
           <p className={styles.fieldNote}>
-            No video was made. What to try: press Try again, change the goal, or use a page that opens
-            without signing in.
+            No video was made. The steps it tried are listed{" "}
+            {view.stepFile?.steps.length ? "beside this" : "below"}. What to try: press Try again, change
+            the goal, or use a page that opens without signing in.
           </p>
           {retryError && (
             <p className={styles.error} role="alert">
@@ -487,6 +588,7 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
             onSelect={null}
             onCopy={copyFindings}
           />
+          <StepsPanel jobId={view.job.id} stepFile={view.stepFile} onSelect={null} />
         </aside>
       </div>
     );
@@ -518,6 +620,11 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
             />
           ) : (
             <p className={styles.panelEmpty}>The video file is missing. Press Make another video to try again.</p>
+          )}
+          {view.stepFile?.resultText?.trim() && (
+            <p className={styles.resultText}>
+              <strong>Result:</strong> {view.stepFile.resultText.trim()}
+            </p>
           )}
           <div className={styles.actions}>
             {video && (
@@ -568,14 +675,11 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
             onSelect={selectFinding}
             onCopy={copyFindings}
           />
-          <section className={styles.panel} aria-labelledby="steps-title">
-            <h2 id="steps-title" className={styles.panelTitle}>
-              Steps
-            </h2>
-            <p className={styles.panelEmpty}>
-              Each step the agent took will appear here, with a picture and the reason for it.
-            </p>
-          </section>
+          <StepsPanel
+            jobId={view.job.id}
+            stepFile={view.stepFile}
+            onSelect={(step) => seekToStep(step.id, step.index)}
+          />
           <section className={styles.panel} aria-labelledby="cost-title">
             <h2 id="cost-title" className={styles.panelTitle}>
               Cost
