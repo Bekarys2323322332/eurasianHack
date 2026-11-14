@@ -1,13 +1,18 @@
+/**
+ * Load local data-directory configuration and create the SQLite database.
+ */
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { getDataDir, getDb } from "../src/shared/jobs";
 
+// Node 20.12+ loads .env directly; older supported releases use the fallback below.
 try {
   process.loadEnvFile?.(".env");
 } catch {
   // Setup reports malformed or unreadable environment files before this runs.
 }
 
+// Read DATA_DIR directly when loadEnvFile is unavailable in the current Node version.
 if (process.env.DATA_DIR === undefined) {
   const dataDirLine = readFileSync(".env", "utf8")
     .split(/\r?\n/)
@@ -18,5 +23,6 @@ if (process.env.DATA_DIR === undefined) {
   }
 }
 
+// Opening the shared database initializes its schema before reporting its path.
 getDb();
 console.log(path.join(getDataDir(), "app.db"));

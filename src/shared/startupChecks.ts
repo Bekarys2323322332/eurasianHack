@@ -1,3 +1,7 @@
+/**
+ * Gather the environment and local-runtime checks used by both startup and
+ * the dynamic health endpoint; only required failures block the server.
+ */
 import { spawnSync } from "node:child_process";
 import { getDb } from "./jobs";
 
@@ -9,6 +13,7 @@ export interface CheckResult {
   fix?: string;
 }
 
+// Required model configuration gates startup; TTS can be configured later.
 export const REQUIRED_ENV_VARS = [
   "LLM_API_KEY",
   "LLM_BASE_URL",
@@ -17,6 +22,7 @@ export const REQUIRED_ENV_VARS = [
 ] as const;
 export const OPTIONAL_ENV_VARS = ["TTS_API_KEY"] as const;
 
+/** Check configured values without copying any secret value into the result. */
 export function checkEnv(env: Record<string, string | undefined> = process.env): CheckResult[] {
   const requiredEnvVars = new Set<string>(REQUIRED_ENV_VARS);
   return [...REQUIRED_ENV_VARS, ...OPTIONAL_ENV_VARS].map((name) => {
@@ -31,6 +37,7 @@ export function checkEnv(env: Record<string, string | undefined> = process.env):
   });
 }
 
+/** Separate blocking failures from optional failures that should only warn. */
 export function summarizeChecks(
   checks: CheckResult[],
 ): { ok: boolean; warnings: CheckResult[] } {
@@ -40,6 +47,7 @@ export function summarizeChecks(
   };
 }
 
+/** Launch Chromium, open a page, and enforce a twenty-second overall limit. */
 export async function checkChromium(): Promise<CheckResult> {
   let browser: { close: () => Promise<void>; newPage: () => Promise<{ close: () => Promise<void> }> } | undefined;
   let expired = false;
@@ -85,6 +93,7 @@ export async function checkChromium(): Promise<CheckResult> {
   }
 }
 
+/** Confirm ffmpeg is callable and include the platform-specific install command. */
 export function checkFfmpeg(): CheckResult {
   const result = spawnSync("ffmpeg", ["-version"], { stdio: "ignore" });
   if (!result.error && result.status === 0) {
@@ -108,6 +117,7 @@ export function checkFfmpeg(): CheckResult {
   };
 }
 
+/** Verify that the configured SQLite database can execute a simple query. */
 export function checkDatabase(): CheckResult {
   try {
     getDb().prepare("SELECT 1").get();
@@ -128,6 +138,7 @@ export function checkDatabase(): CheckResult {
   }
 }
 
+/** Run every environment and local-runtime check once for the current process. */
 export async function runStartupChecks(): Promise<{
   ok: boolean;
   checks: CheckResult[];
@@ -142,6 +153,7 @@ export async function runStartupChecks(): Promise<{
   return { ...summarizeChecks(checks), checks };
 }
 
+/** Format required failures as a plain console report with actionable fixes. */
 export function formatCheckReport(result: { ok: boolean; checks: CheckResult[] }): string {
   const failedChecks = result.checks.filter((check) => check.required && !check.ok);
   if (failedChecks.length === 0) return "Startup checks passed.";

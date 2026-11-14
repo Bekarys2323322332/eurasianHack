@@ -42,10 +42,10 @@ Node.js, ffmpeg and cloudflared:
 
 ```bash
 brew install node@22 ffmpeg cloudflared
-brew link --overwrite node@22
+brew link --force --overwrite node@22
 ```
 
-Node.js 22 is keg-only in Homebrew, so the link command makes `node` and `npm`
+Node.js 22 is keg-only in Homebrew, so the forced link makes `node` and `npm`
 available in the terminal. Alternatively, install Node.js 22 using nvm or the
 installer from [nodejs.org](https://nodejs.org/).
 

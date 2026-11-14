@@ -1,3 +1,7 @@
+/**
+ * Run startup probes in a plain Node subprocess so Next's instrumentation
+ * bundle does not try to resolve Node-only dependencies such as SQLite.
+ */
 const startupCheckScript = `
 const checksModule = await import("./src/shared/startupChecks.ts");
 const { formatCheckReport, runStartupChecks } = checksModule.default ?? checksModule;
@@ -5,6 +9,9 @@ const result = await runStartupChecks();
 console.log(JSON.stringify({ result, report: formatCheckReport(result) }));
 `;
 
+/**
+ * Start Node-runtime checks after Next's guards while avoiding Edge bundling.
+ */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   if (process.env.NEXT_PHASE === "phase-production-build") return;
@@ -42,9 +49,13 @@ export async function register() {
   }
 
   for (const warning of report.result.warnings) {
-    console.warn(
-      `Warning: ${warning.name} is not set. Videos will have no voiceover until you add it to .env.`,
-    );
+    if (warning.name === "TTS_API_KEY") {
+      console.warn(
+        "Warning: TTS_API_KEY is not set. Videos will have no voiceover until you add it to .env.",
+      );
+    } else {
+      console.warn(`Warning: ${warning.name} is not ready.`);
+    }
   }
 
   console.log("Startup check passed");

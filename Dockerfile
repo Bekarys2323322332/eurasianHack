@@ -21,6 +21,7 @@ RUN npm ci
 
 # ---- build ----
 FROM deps AS build
+ENV NEXT_OUTPUT_STANDALONE=1
 COPY . .
 RUN npm run build
 

@@ -3,6 +3,8 @@
  * as a prop; client code calls toPublicUrl(path, base) to fall back to the
  * browser address when no public base URL was configured.
  */
+
+/** Validate and normalize the configured public HTTP(S) base URL. */
 export function getPublicBaseUrl(
   env: Record<string, string | undefined> = process.env,
 ): string | null {
@@ -18,6 +20,7 @@ export function getPublicBaseUrl(
   }
 }
 
+/** Join a route path to a configured base URL or the current browser origin. */
 export function toPublicUrl(path: string, baseUrl?: string | null): string {
   const base =
     baseUrl ?? (typeof window !== "undefined" ? window.location.origin : "");

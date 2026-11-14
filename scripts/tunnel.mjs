@@ -1,15 +1,21 @@
+/**
+ * Open a Cloudflare quick tunnel to the local app and announce its public URL.
+ */
 import { spawn } from "node:child_process";
 
+// Reuse the app's port when configured, otherwise match the local demo default.
 const port = process.env.PORT || "3000";
 const url = `http://localhost:${port}`;
 const verbose = process.argv.includes("--verbose");
 
+// Warn if the local app is not ready, but still let cloudflared start.
 try {
   await fetch(url, { signal: AbortSignal.timeout(1500) });
 } catch {
   console.warn("Warning: Start the app first with npm run demo.");
 }
 
+// Keep cloudflared output quiet by default while retaining its URL and errors.
 const child = spawn("cloudflared", ["tunnel", "--url", url], {
   stdio: ["inherit", "pipe", "pipe"],
 });
@@ -17,6 +23,7 @@ let announced = false;
 let outputTail = "";
 let pendingErrorLine = "";
 
+/** Forward verbose output, surface errors, and announce the first quick-tunnel URL. */
 function handleOutput(chunk, stream) {
   const text = chunk.toString();
   if (verbose) stream.write(chunk);
@@ -45,8 +52,11 @@ function handleOutput(chunk, stream) {
   }
 }
 
+// Parse both output streams because cloudflared may print the URL on either one.
 child.stdout.on("data", (chunk) => handleOutput(chunk, process.stdout));
 child.stderr.on("data", (chunk) => handleOutput(chunk, process.stderr));
+
+// Translate process errors into readable installation or startup guidance.
 child.on("error", (error) => {
   if (error.code === "ENOENT") {
     console.error("cloudflared is not installed. Install it with:");
@@ -57,6 +67,8 @@ child.on("error", (error) => {
   }
   process.exitCode = 1;
 });
+
+// Preserve cloudflared's exit status so tunnel failures are visible to the shell.
 child.on("exit", (code, signal) => {
   if (!verbose && /error|failed|unable|fatal/i.test(pendingErrorLine)) {
     console.error(pendingErrorLine);
@@ -68,6 +80,7 @@ child.on("exit", (code, signal) => {
   }
 });
 
+// Forward terminal shutdown signals so the child tunnel does not remain orphaned.
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => child.kill(signal));
 }
