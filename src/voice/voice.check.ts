@@ -65,7 +65,8 @@ async function main() {
       viewport: { width: 1280, height: 720 },
       title: "Check",
       steps: [
-        step(1, {}),
+        // keyWord is not in the shared step type; it must survive the save.
+        step(1, { keyWord: "Line" }),
         step(2, { narration: "BROKEN" }), // the fake provider always refuses this one
         step(3, { status: "deadend" }),
         step(4, { hidden: true }),
@@ -96,6 +97,7 @@ async function main() {
 
   const steps = JSON.parse(fs.readFileSync(path.join(job, "steps.json"), "utf8")).steps;
   assert.equal(steps[0].audioFile, "audio/s1.mp3");
+  assert.equal(steps[0].keyWord, "Line"); // unknown fields are kept
   assert.equal(steps[0].audioSeconds, 1.306); // 50 frames, rounded to milliseconds
   assert.ok(fs.existsSync(path.join(job, "audio/s1.mp3")));
   // Failed, deadend, hidden and silent steps all stay without audio.

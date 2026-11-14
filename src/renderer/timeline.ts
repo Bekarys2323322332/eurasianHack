@@ -14,12 +14,32 @@ import { FPS, type Settings, type Style } from "./settings";
 export type Aspect = "16:9" | "9:16";
 
 /**
+ * A step as the renderer sees it: the shared step plus two extras.
+ *
+ * keyWord is an optional field in steps.json that is not part of the shared
+ * step file type yet. renderJob.ts reads it straight from the file.
+ * scrollShift is worked out by renderJob.ts from the two screenshots.
+ */
+export type RenderStep = Step & {
+  /** The word of the caption to highlight (social style). */
+  keyWord?: string | null;
+  /**
+   * Scroll steps only: how far the page moved, as a fraction of its height
+   * (0.5 is half a screen down). Null or missing: unknown, slide a full screen.
+   */
+  scrollShift?: number | null;
+};
+
+/** The step file with the renderer's extras on each step. */
+export type RenderStepFile = Omit<StepFile, "steps"> & { steps: RenderStep[] };
+
+/**
  * Everything the Remotion composition needs to draw the video.
  * (A type alias, not an interface, because Remotion wants props to be a
  * plain record.)
  */
 export type VideoProps = {
-  stepFile: StepFile;
+  stepFile: RenderStepFile;
   aspect: Aspect;
   /** Which look to use: pacing, zoom strength and text sizes. */
   style: Style;
@@ -48,7 +68,7 @@ export interface ScenePlan {
 
 /** One step of the video with its place on the timeline. */
 export interface Scene {
-  step: Step;
+  step: RenderStep;
   /** Position among the steps shown in the video, starting at 1. */
   number: number;
   /** First frame of the scene, counted from the start of the video. */
@@ -87,7 +107,7 @@ export function toFrames(seconds: number): number {
  * Steps that appear in the video. Dead ends (the agent tried something that
  * did not work) and steps the user removed in the editor are left out.
  */
-export function visibleSteps(stepFile: StepFile): Step[] {
+export function visibleSteps(stepFile: RenderStepFile): RenderStep[] {
   return stepFile.steps.filter((step) => step.status === "ok" && !step.hidden);
 }
 
@@ -158,7 +178,7 @@ export function recapLine(step: Step): string {
 }
 
 /** Lay out title card, then the visible steps end to end, then the end card. */
-export function buildTimeline(stepFile: StepFile, settings: Settings): Timeline {
+export function buildTimeline(stepFile: RenderStepFile, settings: Settings): Timeline {
   const { width, height } = stepFile.viewport;
   const howto = stepFile.mode === "howto";
   const titleFrames = toFrames(settings.timing.titleCardSeconds);
@@ -241,4 +261,15 @@ export function musicVolume(frame: number, timeline: Timeline, settings: Setting
 
   const fadeOut = clamp((timeline.totalFrames - frame) / toFrames(fadeOutSeconds), 0, 1);
   return (volume + (volumeUnderNarration - volume) * ducked) * fadeOut;
+}
+
+/**
+ * The frame used for the thumbnail picture (poster.jpg): the middle of the
+ * middle scene, where the page is in view and no scene change is under way.
+ * Falls back to the middle of the video when there are no scenes.
+ */
+export function posterFrame(timeline: Timeline): number {
+  const scene = timeline.scenes[Math.floor(timeline.scenes.length / 2)];
+  if (!scene) return Math.floor(timeline.totalFrames / 2);
+  return scene.from + Math.floor(scene.frames / 2);
 }
