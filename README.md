@@ -155,3 +155,11 @@ docker run -p 3000:3000 --env-file .env -v "$PWD/data:/app/data" eurasianhack
 Mount a persistent volume at `/app/data` so the SQLite database and job files
 survive restarts. Set the variables from `.env.example` in the host's
 environment configuration.
+
+## Web app
+
+- `/` home page: pick a mode, paste a link, press Generate. Finished videos show in the gallery.
+- `/jobs/<id>` job page: live progress (polls every 2 seconds), then the video with Download and Share, or a plain failure message with Try again.
+- `POST /api/jobs` creates a job and queues it. `GET /api/jobs/<id>` returns the job, step file and video links. `GET /api/jobs/<id>/files/<path>` serves job files (supports Range for video).
+- Only one job runs at a time; the rest wait in a queue (`src/app/_lib/pipeline.ts`).
+- The agent and renderer are reached only through `src/app/_lib/stages.ts`. Until they are merged, stubs copy `fixtures/fake-job` and build a simple ffmpeg slideshow. Swap the export in `stages.ts` to use the real ones.

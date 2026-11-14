@@ -4,6 +4,12 @@
   --foreground: #f2f4f8;
   --muted: #9aa3b5;
   --accent: #6c5cff;
+  --accent-soft: rgba(108, 92, 255, 0.14);
+  --surface: #12151d;
+  --border: #262b38;
+  --warning: #f5b84a;
+  --error: #e5484d;
+  --error-soft: rgba(229, 72, 77, 0.12);
 }
 
 * {
