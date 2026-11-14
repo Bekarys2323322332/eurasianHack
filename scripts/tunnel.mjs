@@ -3,9 +3,8 @@
  */
 import { spawn } from "node:child_process";
 
-// Reuse the app's port when configured, otherwise match the local demo default.
-const port = process.env.PORT || "3000";
-const url = `http://localhost:${port}`;
+// The demo command always starts Next.js on port 3000.
+const url = "http://localhost:3000";
 const verbose = process.argv.includes("--verbose");
 
 // Warn if the local app is not ready, but still let cloudflared start.
