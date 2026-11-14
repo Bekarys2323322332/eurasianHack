@@ -6,6 +6,8 @@
  * were created. The queue lives on globalThis so Next's dev reloads do not
  * create a second copy.
  */
+import fs from "node:fs";
+import path from "node:path";
 import { getJob, getJobDir, listJobs, updateJob, type Job } from "../../shared/jobs";
 import { LANGUAGES } from "../../voice/config";
 import { copyStepsForNewJob } from "./reuseSteps";
@@ -172,6 +174,7 @@ async function runPipeline(jobId: string) {
         await recordVoiceAndRender(job, rerender.aspect ?? defaultAspect(job), (name) => {
           stage = name;
         });
+        if (rerender.removeAfter) fs.rmSync(path.join(jobFolder, rerender.removeAfter), { force: true });
       } finally {
         clearRerenderMarker(jobFolder);
       }

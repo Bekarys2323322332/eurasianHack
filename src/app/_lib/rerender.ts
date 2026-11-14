@@ -27,6 +27,8 @@ export type RerenderRequest = z.infer<typeof rerenderRequestSchema>;
 
 export interface RerenderMarker {
   aspect?: "16:9" | "9:16";
+  /** A video file to delete once the new render succeeds (the other format, now out of date). */
+  removeAfter?: string;
 }
 
 export class RerenderError extends Error {}
@@ -46,7 +48,11 @@ function readSteps(jobFolder: string): StepFile {
  * Returns how many steps changed. A changed narration drops the step's audio
  * so the voice stage records that line again (unchanged lines stay cached).
  */
-export function writeRerenderRequest(jobFolder: string, request: RerenderRequest): number {
+export function writeRerenderRequest(
+  jobFolder: string,
+  request: RerenderRequest,
+  options: { removeAfter?: string } = {},
+): number {
   const stepFile = readSteps(jobFolder);
   const byId = new Map(request.edits.map((edit) => [edit.id, edit]));
   let changed = 0;
@@ -77,7 +83,10 @@ export function writeRerenderRequest(jobFolder: string, request: RerenderRequest
   }
 
   fs.writeFileSync(path.join(jobFolder, "steps.json"), `${JSON.stringify(stepFile, null, 2)}\n`);
-  const marker: RerenderMarker = request.aspect ? { aspect: request.aspect } : {};
+  const marker: RerenderMarker = {
+    ...(request.aspect ? { aspect: request.aspect } : {}),
+    ...(changed > 0 && options.removeAfter ? { removeAfter: options.removeAfter } : {}),
+  };
   fs.writeFileSync(path.join(jobFolder, MARKER), `${JSON.stringify(marker)}\n`);
   return changed;
 }
@@ -88,7 +97,10 @@ export function readRerenderMarker(jobFolder: string): RerenderMarker | null {
   if (!fs.existsSync(file)) return null;
   try {
     const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as RerenderMarker;
-    return { aspect: parsed.aspect === "9:16" || parsed.aspect === "16:9" ? parsed.aspect : undefined };
+    return {
+      aspect: parsed.aspect === "9:16" || parsed.aspect === "16:9" ? parsed.aspect : undefined,
+      removeAfter: /^video-(16x9|9x16)\.mp4$/.test(parsed.removeAfter ?? "") ? parsed.removeAfter : undefined,
+    };
   } catch {
     return {};
   }
