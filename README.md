@@ -3,39 +3,64 @@
 **Send an AI agent to use your product like a first-time visitor. You get a
 cinematic video of what it did, and a report of where it got stuck.**
 
-Built in one day with Devin and Claude Code at the Eurasian Hub x Cognition
-hackathon.
+Paste a link. A browser agent explores your app the way a stranger would,
+narrates what it does, and comes back with a trailer-style video, a plain-language
+list of things to fix, and a cost receipt that shows how cheap the run was.
 
-![A finished job: the video, the findings and the steps](docs/job-page.png)
+Built in one day at the Eurasian Hub x Cognition hackathon.
 
-## What it does
+![A finished job: the video, the findings, the steps and the cost](docs/job-page.png)
 
-1. Paste a link to a live web app and press Generate.
-2. A browser agent (Playwright, driven by a planner and a step model) uses the
-   site. Every click, typed word and scroll is recorded with a screenshot,
-   the click position and the reason in plain words.
-3. A script model writes one narration line and one caption per step, in the
-   language you picked, in the style you picked (trailer, tutorial, social).
-4. A voice is recorded for every line, and Remotion renders the video with
-   zooms on the clicks, captions and music. Landscape for trailer and
-   tutorial, vertical for social.
-5. The job page shows the video, **Result: ...** when the agent reached an
-   answer, a **Steps** panel you can click to jump to each moment, a **things
-   to fix** report in plain language, and a **Cost** panel.
-6. Press **Make another language** to redo narration, voice and render
-   without exploring the site again, or **Make a cut for another audience**
-   to run it again for investors or developers.
+## Try it in two minutes
 
-If the agent cannot finish honestly, the job page says **could not complete**
-with the reason and the steps it tried, and offers **Try again**. No video is
-made up.
+1. Open the app, keep **Demo** mode, paste `https://the-internet.herokuapp.com/`
+   and press **Generate**.
+2. Watch the progress view: exploring the site, writing the script, recording
+   the voice, building the video. About two minutes.
+3. On the finished page: play the video, click a step to jump to it, read the
+   **things to fix**, open the **Cost** panel, then press **Make another
+   language** to get the same video in Russian without exploring the site again.
 
-## The two modes
+For a how-to, switch to **How-to** mode and give a goal, for example
+`calculate 15 percent of 240` on `https://www.calculator.net/percentage-calculator.html`.
+The agent types 15 and 240, presses Calculate, reads **36** off the page and
+stops, and the video says so.
 
-| Mode | Input | What the agent does | Video |
-|---|---|---|---|
-| **Demo** | link, optional GitHub repo | Explores the main things a first-time visitor would try | Energetic product trailer |
-| **How-to** | link and a goal ("Open the Checkboxes page and tick the first one") | Follows the goal step by step and stops when it is done, or says it could not | Numbered steps, title card and recap |
+## What you get
+
+| On the job page | What it is |
+|---|---|
+| **Video** | Landscape or vertical, narrated, captioned, with zooms on each click, sound effects and music. Download or share. |
+| **Result** | For how-to jobs, the answer the agent reached (`Result: 15% of 240 = 36`). |
+| **Steps** | Every step with its screenshot, the action in plain words, the agent's reason and any dead end. Click to seek. Press **Edit** to hide steps or reword lines, then **Re-render**. |
+| **Things to fix** | Usability findings written for a non-technical reader, most serious first, duplicates merged, console noise removed. |
+| **Cost** | What this video cost, what it would have cost with the strongest model everywhere, the percentage saved, and a **Savings forecast** at any monthly volume. |
+| **Another language / audience** | Rerun only script, voice and render for another language, or make a cut for investors or developers. |
+| **Could not complete** | When the goal cannot honestly be reached (login wall, missing feature), the page says so with the steps tried and a **Try again** button. No video is invented. |
+
+## Why it is different
+
+**The agent is honest.** It does not play back a plan blind. After every
+action it reads the page again: new error messages, whether anything changed,
+whether what it typed is really in the field. A failed step is recorded as a
+dead end with the reason, the same action is never repeated, two dead ends in a
+row trigger a re-plan, and a goal check decides when to stop. If the goal is
+not reached, the job ends as *could not complete*.
+
+**One step file drives everything.** The agent writes `steps.json` (every
+step with screenshots, click position, typed text, reason, observed result).
+Script, voice, render and findings only read it. That is why "Make another
+language" and "Re-render" take a minute instead of five: the browser never
+runs again.
+
+**Narration says what really happened.** The script model sees the real typed
+text and the observed result for every step, and the last line states the
+outcome.
+
+**Cheap by design.** Only planning, scripting and the findings write-up use a
+strong model; the dozen "what do I click next" decisions go to a small one.
+Every call is logged with its cost and with what the strong model would have
+charged, so the saving is measured, not estimated.
 
 ## How it works
 
@@ -43,44 +68,36 @@ made up.
   link (+ goal, repo)
         |
         v
-+-----------------+      +----------------+      +---------------+
-| planner (strong)|----->| browser agent  |----->|  steps.json   |
-| plans the route |      | (small model,  |      |  screenshots  |
-+-----------------+      |  Playwright)   |      +-------+-------+
-                         +----------------+              |
++-----------------+      +----------------------+      +---------------+
+| planner (strong)|----->| browser agent (small)|----->|  steps.json   |
+| plans the route |      | observe, decide, act,|      |  screenshots  |
++-----------------+      | verify, goal check   |      +-------+-------+
+                         +----------------------+              |
                       every later stage only reads and updates the step file
-                                                         |
-         +-----------------------+-----------------------+----------------+
+                                                               |
+         +-----------------------+-----------------------+-----+----------+
          v                       v                       v                v
 +----------------+     +------------------+     +----------------+  +-----------+
 | script (strong)|---->| voice (TTS, one  |---->| render         |  | findings  |
 | narration and  |     | mp3 per step,    |     | (Remotion +    |  | (strong,  |
-| caption per    |     | cached by text)  |     |  ffmpeg)       |  | plain     |
-| step, language |     +------------------+     +----------------+  | language) |
-| and style      |                                                  +-----------+
+| caption per    |     | cached by text)  |     |  ffmpeg, sfx,  |  | plain     |
+| step, language |     +------------------+     |  music)        |  | language) |
+| and style      |                              +----------------+  +-----------+
 +----------------+
 ```
 
-- `src/shared/stepFile.ts` is the contract. The agent writes `steps.json`;
-  script, voice, render and findings only read or update it. That is why
-  "Make another language" can skip the agent: it copies the steps and
-  screenshots into a new job and reruns the last three stages.
-- Jobs live in SQLite (`src/shared/jobs.ts`), run one at a time
-  (`src/app/_lib/pipeline.ts`), and write everything to `data/jobs/<id>/`.
-- Every model call goes through `src/llm`. JSON replies are checked against
-  a schema and retried; after two bad small-model replies the call is
-  escalated once to the strong model.
+- `src/agent` plans and explores; `src/shared/stepFile.ts` is the contract;
+  `src/findings` writes the report; `src/voice` records lines; `src/renderer`
+  builds the video; `src/app` is the Next.js web app and job queue; `src/llm`
+  is the only place that talks to a model (schema-checked JSON, retries,
+  small-to-strong escalation, cost log).
+- Jobs live in SQLite and run one at a time. Everything a job produces is in
+  `data/jobs/<id>/`.
 
-## The token cutter, in plain words
+## The token cutter, in real numbers
 
-Only two decisions in a job need a strong model: planning the route and
-writing the script (plus the findings write-up). The twelve or so "what do I
-click next" decisions are cheap, so they go to a small model. Prices per
-model are in `src/llm/models.config.ts`, and every call is logged with its
-cost and what the same call would have cost on the strong model.
-
-Real numbers from one 12-step demo job on the-internet.herokuapp.com
-(small: `deepseek/deepseek-v4.1-flash`, strong: `stepfun/step-5-preview`):
+One 12-step demo job on the-internet.herokuapp.com, small model
+`deepseek/deepseek-v4.1-flash`, strong model `stepfun/step-5-preview`:
 
 | Stage | Calls | Model | Cost |
 |---|---|---|---|
@@ -90,13 +107,12 @@ Real numbers from one 12-step demo job on the-internet.herokuapp.com
 | Writing up what we found | 1 | strong | $0.016 |
 | Voice | 1 | TTS | $0.020 |
 
-Model calls cost **$0.030** against **$0.061** without routing, so **50%
-saved**. The voice is a separate line because routing does not apply to it.
-The whole video, with voice, cost **$0.051**. The Cost panel on each job page
-shows these numbers for that job, and missing prices show as "not available"
-instead of hiding the total.
+Model calls: **$0.030** against **$0.061** without routing, **50% saved**.
+Whole video with voice: **$0.051**. The Cost panel shows these figures for
+every job; the Savings forecast turns them into a monthly number at the volume
+you choose.
 
-## Run on your laptop
+## Run it on your laptop
 
 The app can run on macOS or Windows and be shared through a temporary public
 tunnel. Keep the laptop plugged in and awake while the app is being used.
@@ -273,12 +289,12 @@ environment configuration.
 - Sites that need a login, a CAPTCHA or an email code end as "could not
   complete".
 - Links that open a new tab are opened in the same tab instead.
-- Model gateways differ in structured-output support, so a planner call can
-  occasionally fail twice and the job stops with a plain message. Try again.
-- The Docker image serves the web app but cannot yet render videos; run on a
+- A planner call can occasionally come back malformed twice and the job stops
+  with a plain message. Try again works.
+- There are no accounts: anyone with a share link can see, edit and re-render
+  that video. Fine for a demo, not for production.
+- The Docker image serves the web app but does not render videos yet; run on a
   laptop for the demo.
-- Audience cuts change the script tone, but the planner does not yet take the
-  audience into account.
 
 ## How we built it with AI
 
