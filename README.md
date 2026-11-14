@@ -55,7 +55,8 @@ cd eurasianHack
 npm run setup
 ```
 
-Edit `.env` and fill in the five required values shown in `.env.example`. Start
+Edit `.env` and fill in the four required values shown in `.env.example`.
+`TTS_API_KEY` is optional for now; without it, videos have no voiceover. Start
 the app:
 
 ```bash
@@ -87,7 +88,8 @@ cd eurasianHack
 npm run setup
 ```
 
-Edit `.env` and fill in the five required values shown in `.env.example`. Start
+Edit `.env` and fill in the four required values shown in `.env.example`.
+`TTS_API_KEY` is optional for now; without it, videos have no voiceover. Start
 the app:
 
 ```powershell

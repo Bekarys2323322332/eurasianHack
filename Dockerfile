@@ -39,6 +39,7 @@ COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/public ./public
 COPY --from=build /app/fixtures ./fixtures
 COPY --from=build /app/package.json ./package.json
+COPY --from=build /app/src/shared ./src/shared
 
 RUN mkdir -p /app/data/jobs
 VOLUME ["/app/data"]
