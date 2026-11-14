@@ -1,0 +1,26 @@
+/* Global styles. Dark, calm theme with one accent colour. */
+:root {
+  --background: #0b0d12;
+  --foreground: #f2f4f8;
+  --muted: #9aa3b5;
+  --accent: #6c5cff;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
