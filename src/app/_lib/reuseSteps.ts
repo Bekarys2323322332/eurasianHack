@@ -56,8 +56,6 @@ export function copyStepsForNewJob(
       fs.copyFileSync(from, to);
     }
   }
-  const findings = path.join(sourceFolder, "findings.json");
-  if (fs.existsSync(findings)) fs.copyFileSync(findings, path.join(targetFolder, "findings.json"));
 
   fs.writeFileSync(path.join(targetFolder, "steps.json"), `${JSON.stringify(stepFile, null, 2)}\n`);
   return stepFile;
