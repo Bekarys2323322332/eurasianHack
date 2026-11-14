@@ -151,6 +151,21 @@ describe("collectFindings", () => {
     ]);
   });
 
+  it("gives two different errors on one step different ids", () => {
+    const findings = collectFindings(
+      makeStepFile([
+        makeStep("s1", 1, {
+          errors: ["HTTP 500: https://example.com/data", "HTTP 404: https://example.com/img.png"],
+        }),
+      ]),
+    );
+
+    expect(findings.map(({ id, severity }) => [id, severity])).toEqual([
+      ["s1-broken", "high"],
+      ["s1-broken-2", "medium"],
+    ]);
+  });
+
   it("drops console noise and third-party errors, and uses the dead-end reason when there is one", () => {
     const findings = collectFindings(
       makeStepFile([

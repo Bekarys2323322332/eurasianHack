@@ -127,6 +127,14 @@ function withCount(description: string, count: number): string {
 export function collectFindings(stepFile: StepFile): Finding[] {
   const siteHost = hostOf(stepFile.url);
   const merged = new Map<string, Finding>();
+  const usedIds = new Set<string>();
+
+  const uniqueId = (base: string) => {
+    let id = base;
+    for (let n = 2; usedIds.has(id); n += 1) id = `${base}-${n}`;
+    usedIds.add(id);
+    return id;
+  };
 
   const add = (step: Step, kind: FindingKind, severity: Severity, description: string) => {
     const key = mergeKey(kind, step, description);
@@ -137,7 +145,7 @@ export function collectFindings(stepFile: StepFile): Finding[] {
       return;
     }
     merged.set(key, {
-      id: `${step.id}-${kind}`,
+      id: uniqueId(`${step.id}-${kind}`),
       kind,
       severity,
       stepId: step.id,
