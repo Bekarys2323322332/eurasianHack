@@ -1,34 +1,100 @@
 # eurasianHack
 
-Agent-made cinematic product videos. Built with Devin at the Eurasian Hub x
-Cognition hackathon.
+**Send an AI agent to use your product like a first-time visitor. You get a
+cinematic video of what it did, and a report of where it got stuck.**
 
-> We send an AI agent to use your product like a first-time visitor. You get a
-> cinematic video of what it did, and a report of where it got stuck.
+Built in one day with Devin and Claude Code at the Eurasian Hub x Cognition
+hackathon.
 
-Status: skeleton. The home page shows "Skeleton is live". The agent, the
-renderer and the real web app get built next, each in its own folder.
+![A finished job: the video, the findings and the steps](docs/job-page.png)
 
-## How it is organised
+## What it does
+
+1. Paste a link to a live web app and press Generate.
+2. A browser agent (Playwright, driven by a planner and a step model) uses the
+   site. Every click, typed word and scroll is recorded with a screenshot,
+   the click position and the reason in plain words.
+3. A script model writes one narration line and one caption per step, in the
+   language you picked, in the style you picked (trailer, tutorial, social).
+4. A voice is recorded for every line, and Remotion renders the video with
+   zooms on the clicks, captions and music. Landscape for trailer and
+   tutorial, vertical for social.
+5. The job page shows the video, **Result: ...** when the agent reached an
+   answer, a **Steps** panel you can click to jump to each moment, a **things
+   to fix** report in plain language, and a **Cost** panel.
+6. Press **Make another language** to redo narration, voice and render
+   without exploring the site again, or **Make a cut for another audience**
+   to run it again for investors or developers.
+
+If the agent cannot finish honestly, the job page says **could not complete**
+with the reason and the steps it tried, and offers **Try again**. No video is
+made up.
+
+## The two modes
+
+| Mode | Input | What the agent does | Video |
+|---|---|---|---|
+| **Demo** | link, optional GitHub repo | Explores the main things a first-time visitor would try | Energetic product trailer |
+| **How-to** | link and a goal ("Open the Checkboxes page and tick the first one") | Follows the goal step by step and stops when it is done, or says it could not | Numbered steps, title card and recap |
+
+## How it works
 
 ```
-src/app/        web pages and API routes
-src/agent/      planner and browser agent (Playwright)
-src/renderer/   video builder (Remotion)
-src/llm/        model gateway, routing, cache, cost log
-src/shared/     step file types and validator, SQLite job store
-fixtures/       fake-job: a 5-step step file with placeholder screenshots
-data/jobs/      output per job (not committed)
+  link (+ goal, repo)
+        |
+        v
++-----------------+      +----------------+      +---------------+
+| planner (strong)|----->| browser agent  |----->|  steps.json   |
+| plans the route |      | (small model,  |      |  screenshots  |
++-----------------+      |  Playwright)   |      +-------+-------+
+                         +----------------+              |
+                      every later stage only reads and updates the step file
+                                                         |
+         +-----------------------+-----------------------+----------------+
+         v                       v                       v                v
++----------------+     +------------------+     +----------------+  +-----------+
+| script (strong)|---->| voice (TTS, one  |---->| render         |  | findings  |
+| narration and  |     | mp3 per step,    |     | (Remotion +    |  | (strong,  |
+| caption per    |     | cached by text)  |     |  ffmpeg)       |  | plain     |
+| step, language |     +------------------+     +----------------+  | language) |
+| and style      |                                                  +-----------+
++----------------+
 ```
 
-The **step file** (`src/shared/stepFile.ts`) is the contract between all
-parts. The agent writes it; every later stage only reads or updates it.
-`validateStepFile(json)` checks a step file and returns readable errors.
+- `src/shared/stepFile.ts` is the contract. The agent writes `steps.json`;
+  script, voice, render and findings only read or update it. That is why
+  "Make another language" can skip the agent: it copies the steps and
+  screenshots into a new job and reruns the last three stages.
+- Jobs live in SQLite (`src/shared/jobs.ts`), run one at a time
+  (`src/app/_lib/pipeline.ts`), and write everything to `data/jobs/<id>/`.
+- Every model call goes through `src/llm`. JSON replies are checked against
+  a schema and retried; after two bad small-model replies the call is
+  escalated once to the strong model.
 
-The **job store** (`src/shared/jobs.ts`) keeps jobs in SQLite at
-`$DATA_DIR/app.db` with `createJob`, `getJob`, `listJobs` and `updateJob`.
-Job statuses: queued, planning, running, scripting, voicing, rendering, done,
-failed.
+## The token cutter, in plain words
+
+Only two decisions in a job need a strong model: planning the route and
+writing the script (plus the findings write-up). The twelve or so "what do I
+click next" decisions are cheap, so they go to a small model. Prices per
+model are in `src/llm/models.config.ts`, and every call is logged with its
+cost and what the same call would have cost on the strong model.
+
+Real numbers from one 12-step demo job on the-internet.herokuapp.com
+(small: `deepseek/deepseek-v4.1-flash`, strong: `stepfun/step-5-preview`):
+
+| Stage | Calls | Model | Cost |
+|---|---|---|---|
+| Planning | 1 | strong | $0.008 |
+| Exploring the site | 12 | small | $0.002 (would be $0.033 on the strong model) |
+| Writing the script | 1 | strong | $0.005 |
+| Writing up what we found | 1 | strong | $0.016 |
+| Voice | 1 | TTS | $0.020 |
+
+Model calls cost **$0.030** against **$0.061** without routing, so **50%
+saved**. The voice is a separate line because routing does not apply to it.
+The whole video, with voice, cost **$0.051**. The Cost panel on each job page
+shows these numbers for that job, and missing prices show as "not available"
+instead of hiding the total.
 
 ## Run on your laptop
 
@@ -133,7 +199,7 @@ Other commands:
 | `npm run setup` | Install dependencies and Chromium, create `.env` and initialize SQLite |
 | `npm run demo` | Build the production app and start it on port 3000 |
 | `npm run tunnel` | Expose the local app through a Cloudflare quick tunnel |
-| `npm test` | Unit tests (step file validation, job store) |
+| `npm test` | Unit tests (step file, job store, script, findings, cost, language reuse) |
 | `npm run validate:fixture` | Validate `fixtures/fake-job/steps.json` |
 | `npm run typecheck` | TypeScript check |
 | `npm run lint` | ESLint |
@@ -185,7 +251,7 @@ step badges, a "How to ..." title card and a written recap at the end.
 Checks that need no key and no network:
 `npx tsx src/renderer/timeline.check.ts` and `npx tsx src/voice/voice.check.ts`.
 
-## Optional: Docker deployment
+## Deploy
 
 The included Dockerfile packages Chromium and ffmpeg. Use a host that runs
 Docker (for example, a VM); serverless hosting will not work.
@@ -199,10 +265,27 @@ Mount a persistent volume at `/app/data` so the SQLite database and job files
 survive restarts. Set the variables from `.env.example` in the host's
 environment configuration.
 
-## Web app
+## Known limits
 
-- `/` home page: pick a mode, paste a link, press Generate. Finished videos show in the gallery.
-- `/jobs/<id>` job page: live progress (polls every 2 seconds), then the video with Download and Share, or a plain failure message with Try again.
-- `POST /api/jobs` creates a job and queues it. `GET /api/jobs/<id>` returns the job, step file and video links. `GET /api/jobs/<id>/files/<path>` serves job files (supports Range for video).
-- Only one job runs at a time; the rest wait in a queue (`src/app/_lib/pipeline.ts`).
-- The real browser agent and Remotion renderer are wired through `src/app/_lib/stages.ts`.
+- One job at a time, about 1.5 to 4 minutes each, and at most 10 waiting.
+- The agent is blocked from local and private network addresses, so it cannot
+  test an app that only runs on your machine. Put it behind a tunnel first.
+- Sites that need a login, a CAPTCHA or an email code end as "could not
+  complete".
+- Links that open a new tab are opened in the same tab instead.
+- Model gateways differ in structured-output support, so a planner call can
+  occasionally fail twice and the job stops with a plain message. Try again.
+- The Docker image serves the web app but cannot yet render videos; run on a
+  laptop for the demo.
+- Audience cuts change the script tone, but the planner does not yet take the
+  audience into account.
+
+## How we built it with AI
+
+### Tools used
+
+### What worked
+
+### Where it helped
+
+### Where it failed
