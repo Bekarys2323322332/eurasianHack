@@ -18,9 +18,9 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { validateStepFile } from "../shared/stepFile";
-import { resolveVoice } from "./config";
+import { PRICE_PER_CHARACTER_USD, resolveVoice } from "./config";
 import { mp3DurationSeconds } from "./mp3Duration";
-import { PROVIDER_NAME, lookupCost, synthesize } from "./provider";
+import { PROVIDER_NAME, synthesize } from "./provider";
 
 export interface VoiceOptions {
   /** Language of the narration text, e.g. "en" or "ru". See config.ts. */
@@ -39,10 +39,19 @@ export interface VoiceSummary {
   /** What went wrong for each failed line, in plain words. */
   failures: { stepId: string; error: string }[];
   /**
-   * What this run cost in US dollars, as reported by the provider. Null when
-   * the provider did not report a cost for at least one generated line.
+   * What this run cost in US dollars: characters sent to the provider times
+   * the price per character in config.ts. Lines from the cache cost 0, so a
+   * run served entirely from the cache costs 0.
    */
-  totalCost: number | null;
+  cost: number;
+  /**
+   * Where the cost number comes from. Always "calculated": it is worked out
+   * here, not read from the provider's billing record (which was slow to
+   * appear and sometimes missing).
+   */
+  costSource: "calculated";
+  /** Same number as cost. Kept under the old name for callers that still read it. */
+  totalCost: number;
 }
 
 /** Shared by all jobs, so the same line in two jobs is only paid for once. */
@@ -86,8 +95,17 @@ export async function generateVoice(
   fs.mkdirSync(path.join(jobFolder, "audio"), { recursive: true });
   fs.mkdirSync(cacheDir(), { recursive: true });
 
-  const summary: VoiceSummary = { generated: 0, cached: 0, failed: 0, failures: [], totalCost: 0 };
-  const requestIds: (string | null)[] = [];
+  const summary: VoiceSummary = {
+    generated: 0,
+    cached: 0,
+    failed: 0,
+    failures: [],
+    cost: 0,
+    costSource: "calculated",
+    totalCost: 0,
+  };
+  // Characters of text the provider was paid to speak in this run.
+  let charactersGenerated = 0;
 
   // ponytail: lines are done one after another (about a second each). Run a
   // few at once if jobs with many steps make this the slow part.
@@ -103,12 +121,12 @@ export async function generateVoice(
       if (fs.existsSync(cached)) {
         summary.cached += 1;
       } else {
-        const speech = await synthesizeWithRetry(text, voice);
+        const audio = await synthesizeWithRetry(text, voice);
         // Write under a temporary name first so a crash half way through
         // can never leave a broken file in the cache.
-        fs.writeFileSync(`${cached}.part`, speech.audio);
+        fs.writeFileSync(`${cached}.part`, audio);
         fs.renameSync(`${cached}.part`, cached);
-        requestIds.push(speech.requestId);
+        charactersGenerated += text.length;
         summary.generated += 1;
       }
       fs.copyFileSync(cached, target);
@@ -132,11 +150,12 @@ export async function generateVoice(
   // Everything else in steps.json is written back unchanged.
   fs.writeFileSync(stepsPath, `${JSON.stringify(stepFile, null, 2)}\n`);
 
-  // Ask the provider what the new lines cost. Cached lines cost nothing.
-  const costs = await Promise.all(requestIds.map((id) => (id ? lookupCost(id) : null)));
-  summary.totalCost = costs.some((cost) => cost === null)
-    ? null
-    : costs.reduce<number>((sum, cost) => sum + (cost ?? 0), 0);
+  // The provider bills per character of text. Only lines it actually spoke
+  // in this run count: cached lines cost nothing, and a line that failed
+  // twice produced no audio. Rounded to a millionth of a dollar so the sum
+  // does not carry floating point crumbs.
+  summary.cost = Math.round(charactersGenerated * PRICE_PER_CHARACTER_USD * 1e6) / 1e6;
+  summary.totalCost = summary.cost;
 
   return summary;
 }

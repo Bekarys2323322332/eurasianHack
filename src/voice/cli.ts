@@ -61,11 +61,7 @@ generateVoice(job, { language, voice })
     for (const failure of summary.failures) {
       console.log(`  ${failure.stepId}: ${failure.error}`);
     }
-    console.log(
-      summary.totalCost === null
-        ? "Cost: not reported by the provider"
-        : `Cost: $${summary.totalCost.toFixed(4)}`,
-    );
+    console.log(`Cost: $${summary.cost.toFixed(4)} (${summary.costSource})`);
   })
   .catch((error) => {
     console.error(error instanceof Error ? error.message : error);
