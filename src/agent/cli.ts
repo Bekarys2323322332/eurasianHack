@@ -5,6 +5,7 @@
 import { existsSync } from "node:fs";
 import { createJob } from "../shared/jobs";
 import type { JobMode } from "../shared/stepFile";
+import { formatTotalCost } from "./cost";
 import { runAgent } from "./index";
 
 interface CliOptions {
@@ -83,7 +84,7 @@ async function main(): Promise<void> {
   });
 
   console.log(`Step file: ${result.stepFilePath}`);
-  console.log(`Total cost: $${result.costUsd.toFixed(6)}`);
+  console.log(formatTotalCost(result.costUsd, result.unknownCostModel));
 }
 
 void main().catch((error: unknown) => {

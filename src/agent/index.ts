@@ -26,6 +26,12 @@ import {
   type ModelResult,
 } from "../llm";
 import {
+  addAgentCostCall,
+  createAgentCostFile,
+  findUnpricedModel,
+  type AgentCostFile,
+} from "./cost";
+import {
   assertPublicUrl,
   detectLoginWall,
   extractInteractiveElements,
@@ -54,20 +60,8 @@ const agentActionSchema = z.object({
 export interface AgentResult {
   stepFile: StepFile;
   stepFilePath: string;
-  costUsd: number;
-}
-
-interface AgentCostCall {
-  stage: string;
-  model: string;
-  inputTokens: number;
-  outputTokens: number;
   costUsd: number | null;
-}
-
-interface AgentCostFile {
-  calls: AgentCostCall[];
-  totalUsd: number;
+  unknownCostModel: string | null;
 }
 
 /** Update the SQLite job and send the same plain-language progress to callers. */
@@ -120,14 +114,7 @@ async function recordModelCall(
   stage: string,
   result: Pick<ModelResult<unknown>, "model" | "inputTokens" | "outputTokens" | "costUsd">,
 ): Promise<void> {
-  costFile.calls.push({
-    stage,
-    model: result.model,
-    inputTokens: result.inputTokens,
-    outputTokens: result.outputTokens,
-    costUsd: result.costUsd,
-  });
-  if (result.costUsd !== null) costFile.totalUsd += result.costUsd;
+  addAgentCostCall(costFile, stage, result);
   await persistCostFile(costFilePath, costFile);
 }
 
@@ -151,7 +138,7 @@ export async function runAgent(
   const stepsDir = path.join(jobDir, "steps");
   const stepFilePath = path.join(jobDir, "steps.json");
   const costFilePath = path.join(jobDir, "agent-cost.json");
-  const costFile: AgentCostFile = { calls: [], totalUsd: 0 };
+  const costFile = createAgentCostFile();
   let browser: Browser | undefined;
 
   try {
@@ -347,6 +334,7 @@ export async function runAgent(
       stepFile: validation.stepFile,
       stepFilePath,
       costUsd: costFile.totalUsd,
+      unknownCostModel: findUnpricedModel(costFile),
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

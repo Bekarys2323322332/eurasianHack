@@ -6,6 +6,12 @@ import {
   isPrivateHost,
   performBrowserAction,
 } from "../src/agent/browser";
+import {
+  addAgentCostCall,
+  createAgentCostFile,
+  findUnpricedModel,
+  formatTotalCost,
+} from "../src/agent/cost";
 import { buildStepGoal } from "../src/agent/planner";
 
 describe("browser helpers", () => {
@@ -185,5 +191,33 @@ describe("step-model goal", () => {
       goal: "Open the top story's comments",
       requireFullRoute: false,
     });
+  });
+});
+
+describe("agent cost accounting", () => {
+  it("marks the total unknown when any model call has no configured price", () => {
+    const costFile = createAgentCostFile();
+    addAgentCostCall(costFile, "planner", {
+      model: "anthropic/claude-haiku-5.5",
+      inputTokens: 10,
+      outputTokens: 5,
+      costUsd: 0.25,
+    });
+    addAgentCostCall(costFile, "agent-step-1", {
+      model: "provider/unlisted-model",
+      inputTokens: 20,
+      outputTokens: 10,
+      costUsd: null,
+    });
+
+    expect(costFile.totalUsd).toBeNull();
+    expect(findUnpricedModel(costFile)).toBe("provider/unlisted-model");
+    expect(formatTotalCost(costFile.totalUsd, findUnpricedModel(costFile))).toBe(
+      "Total cost: unknown (no price for provider/unlisted-model)",
+    );
+  });
+
+  it("formats a known aggregate as a dollar amount", () => {
+    expect(formatTotalCost(0.125, null)).toBe("Total cost: $0.125000");
   });
 });
