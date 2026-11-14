@@ -8,6 +8,7 @@
  */
 import { useRouter } from "next/navigation";
 import { useId, useState, type FormEvent } from "react";
+import { defaultStyle, type Style } from "../../renderer/settings";
 import { LANGUAGES } from "../../voice/config";
 import styles from "./ui.module.css";
 
@@ -44,8 +45,15 @@ function checkWebAddress(value: string): string | null {
 
 export default function JobForm() {
   const router = useRouter();
-  const ids = { url: useId(), extra: useId(), language: useId(), error: useId() };
+  const ids = {
+    url: useId(),
+    extra: useId(),
+    language: useId(),
+    style: useId(),
+    error: useId(),
+  };
   const [mode, setMode] = useState<Mode>("demo");
+  const [styleOverride, setStyleOverride] = useState<Style | null>(null);
   const [url, setUrl] = useState("");
   const [repoUrl, setRepoUrl] = useState("");
   const [goal, setGoal] = useState("");
@@ -53,6 +61,7 @@ export default function JobForm() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const style = styleOverride ?? defaultStyle(mode);
   const urlProblem = checkWebAddress(url);
   const repoProblem = mode === "demo" ? checkWebAddress(repoUrl) : null;
 
@@ -84,6 +93,7 @@ export default function JobForm() {
           repoUrl: mode === "demo" ? repoUrl.trim() || null : null,
           goal: mode === "howto" ? goal.trim() : null,
           language,
+          style,
         }),
       });
       const body = await response.json().catch(() => ({}));
@@ -198,6 +208,19 @@ export default function JobForm() {
           ))}
         </select>
         <p className={styles.fieldNote}>Narration is written and spoken in this language.</p>
+        <label htmlFor={ids.style} className={styles.label}>
+          Style
+        </label>
+        <select
+          id={ids.style}
+          className={styles.input}
+          value={style}
+          onChange={(event) => setStyleOverride(event.target.value as Style)}
+        >
+          <option value="trailer">Trailer: energetic pitch</option>
+          <option value="tutorial">Tutorial: calm step-by-step</option>
+          <option value="social">Social: short vertical clip</option>
+        </select>
       </details>
 
       {error && (

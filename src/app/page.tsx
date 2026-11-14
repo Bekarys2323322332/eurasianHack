@@ -18,7 +18,7 @@ function galleryItems() {
   resumePendingJobs();
   return listJobs({ status: "done", limit: 12 })
     .map((job) => getJobView(job.id))
-    .filter((view) => view !== null && view.videos.landscape !== null)
+    .filter((view) => view !== null && (view.videos.landscape ?? view.videos.vertical) !== null)
     .slice(0, 6);
 }
 

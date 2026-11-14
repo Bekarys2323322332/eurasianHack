@@ -113,8 +113,18 @@ async function runPipeline(jobId: string) {
     const jobFolder = getJobDir(jobId);
     const scriptCall = await writeScript(jobFolder, {
       languageName: LANGUAGES[job.language]?.label ?? "English",
+      style: job.style,
     });
-    appendCostCall(jobFolder, "script", scriptCall);
+    appendCostCall(jobFolder, "script", {
+      model: scriptCall.model,
+      inputTokens: scriptCall.inputTokens,
+      outputTokens: scriptCall.outputTokens,
+      costUsd: scriptCall.costUsd,
+      tier: scriptCall.tier,
+      escalated: scriptCall.escalated,
+      cacheHit: scriptCall.cacheHit,
+      baselineCostUsd: scriptCall.baselineCostUsd,
+    });
 
     stage = "recording the voice";
     updateJob(jobId, { status: "voicing", progressMessage: "Recording the voice" });
@@ -124,6 +134,7 @@ async function runPipeline(jobId: string) {
       inputTokens: 0,
       outputTokens: 0,
       costUsd: voiceSummary.totalCost,
+      cacheHit: voiceSummary.generated === 0 && voiceSummary.cached > 0,
     });
     if (voiceSummary.failed > 0) {
       console.warn(
@@ -135,13 +146,21 @@ async function runPipeline(jobId: string) {
     stage = "building the video";
     updateJob(jobId, { status: "rendering", progressMessage: "Building the video" });
     let lastPercent = -1;
-    await renderJob(getJobDir(jobId), { aspect: "16:9", music: true }, (percent) => {
-      // Write at most every 5 percent so the database is not flooded.
-      if (percent >= lastPercent + 5 || percent === 100) {
-        lastPercent = percent;
-        updateJob(jobId, { progressMessage: `Building the video (${percent}% done)` });
-      }
-    });
+    await renderJob(
+      getJobDir(jobId),
+      {
+        aspect: job.style === "social" ? "9:16" : "16:9",
+        music: true,
+        style: job.style,
+      },
+      (percent) => {
+        // Write at most every 5 percent so the database is not flooded.
+        if (percent >= lastPercent + 5 || percent === 100) {
+          lastPercent = percent;
+          updateJob(jobId, { progressMessage: `Building the video (${percent}% done)` });
+        }
+      },
+    );
 
     updateJob(jobId, { status: "done", progressMessage: "Your video is ready" });
   } catch (error) {

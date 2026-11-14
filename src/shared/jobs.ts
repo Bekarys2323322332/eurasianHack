@@ -11,6 +11,7 @@ import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { defaultStyle, type Style } from "../renderer/settings";
 import type { JobMode } from "./stepFile";
 
 /** Every stage a job moves through, in order. "failed" can happen at any point. */
@@ -30,6 +31,7 @@ export type JobStatus = (typeof JOB_STATUSES)[number];
 export interface Job {
   id: string;
   mode: JobMode;
+  style: Style;
   url: string;
   repoUrl: string | null;
   goal: string | null;
@@ -43,6 +45,7 @@ export interface Job {
 
 export interface NewJob {
   mode: JobMode;
+  style?: Style;
   url: string;
   repoUrl?: string | null;
   goal?: string | null;
@@ -77,6 +80,7 @@ export function getDb(): Database.Database {
     CREATE TABLE IF NOT EXISTS jobs (
       id              TEXT PRIMARY KEY,
       mode            TEXT NOT NULL,
+      style           TEXT,
       url             TEXT NOT NULL,
       repoUrl         TEXT,
       goal            TEXT,
@@ -87,6 +91,11 @@ export function getDb(): Database.Database {
     )
   `);
 
+  const columns = db.pragma("table_info(jobs)") as { name: string }[];
+  if (!columns.some(({ name }) => name === "style")) {
+    db.exec("ALTER TABLE jobs ADD COLUMN style TEXT");
+  }
+
   globalForDb.__jobsDb = db;
   return db;
 }
@@ -96,6 +105,7 @@ export function createJob(input: NewJob): Job {
   const job: Job = {
     id: randomUUID().replace(/-/g, "").slice(0, 12),
     mode: input.mode,
+    style: input.style ?? defaultStyle(input.mode),
     url: input.url,
     repoUrl: input.repoUrl ?? null,
     goal: input.goal ?? null,
@@ -107,8 +117,8 @@ export function createJob(input: NewJob): Job {
 
   getDb()
     .prepare(
-      `INSERT INTO jobs (id, mode, url, repoUrl, goal, language, status, progressMessage, createdAt)
-       VALUES (@id, @mode, @url, @repoUrl, @goal, @language, @status, @progressMessage, @createdAt)`,
+      `INSERT INTO jobs (id, mode, style, url, repoUrl, goal, language, status, progressMessage, createdAt)
+       VALUES (@id, @mode, @style, @url, @repoUrl, @goal, @language, @status, @progressMessage, @createdAt)`,
     )
     .run(job);
 
@@ -117,19 +127,28 @@ export function createJob(input: NewJob): Job {
 
 /** Read one job, or null if it does not exist. */
 export function getJob(id: string): Job | null {
-  const row = getDb().prepare(`SELECT * FROM jobs WHERE id = ?`).get(id) as Job | undefined;
-  return row ?? null;
+  const row = getDb().prepare(`SELECT * FROM jobs WHERE id = ?`).get(id) as JobRow | undefined;
+  return row ? fromJobRow(row) : null;
 }
 
 /** List jobs, newest first. Optionally filter by status. */
 export function listJobs(options: { status?: JobStatus; limit?: number } = {}): Job[] {
   const limit = options.limit ?? 50;
   if (options.status) {
-    return getDb()
+    const rows = getDb()
       .prepare(`SELECT * FROM jobs WHERE status = ? ORDER BY createdAt DESC LIMIT ?`)
-      .all(options.status, limit) as Job[];
+      .all(options.status, limit) as JobRow[];
+    return rows.map(fromJobRow);
   }
-  return getDb().prepare(`SELECT * FROM jobs ORDER BY createdAt DESC LIMIT ?`).all(limit) as Job[];
+  const rows = getDb().prepare(`SELECT * FROM jobs ORDER BY createdAt DESC LIMIT ?`).all(limit) as JobRow[];
+  return rows.map(fromJobRow);
+}
+
+type JobRow = Omit<Job, "style"> & { style: Style | null };
+
+/** Fill the style on rows created before style preferences were stored. */
+function fromJobRow(row: JobRow): Job {
+  return { ...row, style: row.style ?? defaultStyle(row.mode) };
 }
 
 /** Fields that may change after a job is created. */

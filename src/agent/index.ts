@@ -22,13 +22,14 @@ import {
 import {
   callModel,
   ModelOutputError,
-  type ModelOutputUsage,
   type ModelResult,
+  type ModelTier,
 } from "../llm";
 import {
   addAgentCostCall,
   createAgentCostFile,
   findUnpricedModel,
+  modelCostCall,
   type AgentCostFile,
 } from "./cost";
 import {
@@ -112,9 +113,13 @@ async function recordModelCall(
   costFilePath: string,
   costFile: AgentCostFile,
   stage: string,
-  result: Pick<ModelResult<unknown>, "model" | "inputTokens" | "outputTokens" | "costUsd">,
+  requestedTier: ModelTier,
+  result: Pick<
+    ModelResult<unknown>,
+    "model" | "tier" | "inputTokens" | "outputTokens" | "costUsd"
+  >,
 ): Promise<void> {
-  addAgentCostCall(costFile, stage, result);
+  addAgentCostCall(costFile, stage, modelCostCall(result, requestedTier));
   await persistCostFile(costFilePath, costFile);
 }
 
@@ -194,10 +199,10 @@ export async function runAgent(
     let plannerResult: ModelResult<Awaited<ReturnType<typeof planRoute>>["data"]>;
     try {
       plannerResult = await planRoute(page, job);
-      await recordModelCall(costFilePath, costFile, "planner", plannerResult);
+      await recordModelCall(costFilePath, costFile, "planner", "strong", plannerResult);
     } catch (error) {
       if (error instanceof ModelOutputError) {
-        await recordModelCall(costFilePath, costFile, "planner", error.usage);
+        await recordModelCall(costFilePath, costFile, "planner", "strong", error.usage);
       }
       throw error;
     }
@@ -256,14 +261,21 @@ export async function runAgent(
           ].join("\n\n"),
           json: agentActionSchema,
         });
-        await recordModelCall(costFilePath, costFile, `agent-step-${index}`, actionResult);
+        await recordModelCall(
+          costFilePath,
+          costFile,
+          `agent-step-${index}`,
+          "small",
+          actionResult,
+        );
       } catch (error) {
         if (error instanceof ModelOutputError) {
           await recordModelCall(
             costFilePath,
             costFile,
             `agent-step-${index}`,
-            error.usage as ModelOutputUsage,
+            "small",
+            error.usage,
           );
         }
         throw error;

@@ -6,6 +6,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { getJob, getJobDir, type Job } from "../../shared/jobs";
 import { validateStepFile, type StepFile } from "../../shared/stepFile";
+import type { AgentCostFile } from "../../agent/cost";
+import { summarizeCost, type CostSummary } from "./costView";
 import { queuePosition, resumePendingJobs } from "./pipeline";
 
 export interface JobView {
@@ -14,6 +16,7 @@ export interface JobView {
   /** App-relative links (for example /api/jobs/abc/files/video-16x9.mp4). */
   videos: { landscape: string | null; vertical: string | null };
   thumbnail: string | null;
+  cost: CostSummary | null;
   /** Place in line while waiting (1 = next), otherwise 0. */
   queuePosition: number;
 }
@@ -35,6 +38,20 @@ function readStepFile(jobId: string): StepFile | null {
   try {
     const result = validateStepFile(JSON.parse(fs.readFileSync(file, "utf8")));
     return result.ok ? result.stepFile : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Read and summarize a job's cost log when it is available and valid. */
+function readCost(jobId: string): CostSummary | null {
+  const file = path.join(getJobDir(jobId), "agent-cost.json");
+  if (!fs.existsSync(file)) return null;
+
+  try {
+    const costFile = JSON.parse(fs.readFileSync(file, "utf8")) as AgentCostFile;
+    if (!Array.isArray(costFile.calls)) return null;
+    return summarizeCost(costFile, process.env.STRONG_MODEL ?? null);
   } catch {
     return null;
   }
@@ -63,6 +80,7 @@ export function getJobView(jobId: string): JobView | null {
     stepFile,
     videos: { landscape: fileIfExists("video-16x9.mp4"), vertical: fileIfExists("video-9x16.mp4") },
     thumbnail,
+    cost: readCost(jobId),
     queuePosition: queuePosition(jobId),
   };
 }
