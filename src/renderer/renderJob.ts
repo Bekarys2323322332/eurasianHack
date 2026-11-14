@@ -66,6 +66,7 @@ function preparePublicFolder(
   publicDir: string,
   stepFile: StepFile,
   wantMusic: boolean,
+  style: Style,
 ): VideoProps["stepFile"] & { hasMusic: boolean } {
   const copy = (relative: string) => {
     const target = path.join(publicDir, relative);
@@ -90,12 +91,16 @@ function preparePublicFolder(
     return { ...step, audioFile: null, audioSeconds: null };
   });
 
-  // Music is shared by all jobs and lives in the app's own public folder.
-  // The file name is the same in every style, so any style's settings do.
-  const settings = settingsFor("trailer");
-  const musicSource = path.resolve("public", settings.music.file);
-  const hasMusic = wantMusic && fs.existsSync(musicSource);
-  if (hasMusic) fs.copyFileSync(musicSource, path.join(publicDir, settings.music.file));
+  // Music lives in the app's own public folder. The style's own file (for
+  // example music-trailer.mp3) is used when it exists, otherwise the shared
+  // music.mp3, otherwise the video has no music. Whichever is found is
+  // copied under one fixed name, so the video code never needs to know.
+  const { music } = settingsFor(style);
+  const musicSource = [music.styleFile, music.file]
+    .map((name) => path.resolve("public", name))
+    .find((file) => fs.existsSync(file));
+  const hasMusic = wantMusic && musicSource !== undefined;
+  if (wantMusic && musicSource) fs.copyFileSync(musicSource, path.join(publicDir, music.file));
 
   return { ...stepFile, steps, hasMusic };
 }
@@ -119,18 +124,16 @@ export async function renderJob(
 
   const publicDir = fs.mkdtempSync(path.join(os.tmpdir(), "render-public-"));
   try {
+    const rawStepFile = readStepFile(jobFolder);
+    const style = options.style ?? defaultStyle(rawStepFile.mode);
     const { hasMusic, ...stepFile } = preparePublicFolder(
       jobFolder,
       publicDir,
-      readStepFile(jobFolder),
+      rawStepFile,
       options.music,
+      style,
     );
-    const inputProps: VideoProps = {
-      stepFile,
-      aspect: options.aspect,
-      style: options.style ?? defaultStyle(stepFile.mode),
-      music: hasMusic,
-    };
+    const inputProps: VideoProps = { stepFile, aspect: options.aspect, style, music: hasMusic };
 
     // Step 1 (0 to 15 percent): pack the React code into a small website.
     // ponytail: this re-bundles on every render (a few seconds). Cache the

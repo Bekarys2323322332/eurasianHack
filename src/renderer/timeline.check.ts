@@ -91,3 +91,15 @@ const howto = buildTimeline({ ...stepFile, mode: "howto" }, settings);
 assert.equal(howto.howto, true);
 assert.equal(howto.endFrames, toFrames(settings.timing.recapCardSeconds));
 console.log("timeline check passed");
+
+// The social style has no title card: its first scene starts on frame 0.
+// The other two styles open with a title card.
+assert.equal(buildTimeline(stepFile, settingsFor("social")).scenes[0].from, 0);
+assert.ok(buildTimeline(stepFile, settingsFor("tutorial")).scenes[0].from > 0);
+
+// Each style has its own design, not just different numbers.
+const looks = (["trailer", "tutorial", "social"] as const).map((style) => settingsFor(style).look);
+for (const key of ["captionDesign", "sceneTransition"] as const) {
+  assert.equal(new Set(looks.map((look) => look[key])).size, 3, `${key} should differ per style`);
+}
+console.log("style looks check passed");
