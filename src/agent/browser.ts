@@ -308,6 +308,10 @@ export async function performBrowserAction(
 
   if (action.action === "click") {
     const locator = page.locator(`[data-agent-element="${target!.number}"]`);
+    await locator.evaluate((element) => {
+      element.removeAttribute("target");
+      element.closest("a, form")?.removeAttribute("target");
+    });
     await locator.click({ timeout: 5_000 });
     return { target, typedText: null };
   }

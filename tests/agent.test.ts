@@ -4,6 +4,7 @@ import {
   detectLoginWall,
   extractInteractiveElements,
   isPrivateHost,
+  performBrowserAction,
 } from "../src/agent/browser";
 
 describe("browser helpers", () => {
@@ -90,6 +91,52 @@ describe("browser helpers", () => {
     for (const tag of tags) {
       expect(await page.locator(`[data-agent-element="${tag}"]`).count()).toBe(1);
     }
+  });
+
+  it("removes target blank from a link before clicking it", async () => {
+    await page.setContent('<a href="#opened" target="_blank">Open locally</a>');
+    const elements = await extractInteractiveElements(page);
+
+    await performBrowserAction(
+      page,
+      {
+        action: "click",
+        elementNumber: elements[0].number,
+        text: null,
+        reason: "Open the local link",
+        done: false,
+      },
+      elements,
+    );
+
+    expect(page.url()).toContain("#opened");
+    expect(await page.locator('[data-agent-element="1"]').getAttribute("target")).toBeNull();
+    expect(page.context().pages()).toHaveLength(1);
+  });
+
+  it("removes target from a form ancestor before clicking its control", async () => {
+    await page.setContent(`
+      <form target="_blank">
+        <button type="button" target="_blank" onclick="window.location.hash = 'opened'">Open</button>
+      </form>
+    `);
+    const elements = await extractInteractiveElements(page);
+
+    await performBrowserAction(
+      page,
+      {
+        action: "click",
+        elementNumber: elements[0].number,
+        text: null,
+        reason: "Open the form control",
+        done: false,
+      },
+      elements,
+    );
+
+    expect(page.url()).toContain("#opened");
+    expect(await page.locator("button").getAttribute("target")).toBeNull();
+    expect(await page.locator("form").getAttribute("target")).toBeNull();
   });
 
   it("detects a captcha iframe and human-verification copy", async () => {
