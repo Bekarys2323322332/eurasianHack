@@ -13,14 +13,14 @@ export interface CheckResult {
   fix?: string;
 }
 
-// Required model configuration gates startup; TTS can be configured later.
+// The same model gateway configuration powers text narration and speech.
 export const REQUIRED_ENV_VARS = [
   "LLM_API_KEY",
   "LLM_BASE_URL",
   "SMALL_MODEL",
   "STRONG_MODEL",
 ] as const;
-export const OPTIONAL_ENV_VARS = ["TTS_API_KEY"] as const;
+export const OPTIONAL_ENV_VARS = [] as const;
 
 /** Check configured values without copying any secret value into the result. */
 export function checkEnv(env: Record<string, string | undefined> = process.env): CheckResult[] {

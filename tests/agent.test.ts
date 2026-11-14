@@ -1,10 +1,11 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { chromium, type Browser, type Page } from "playwright";
 import {
   detectLoginWall,
   extractInteractiveElements,
   isPrivateHost,
   performBrowserAction,
+  resolvesToPrivate,
 } from "../src/agent/browser";
 import {
   addAgentCostCall,
@@ -13,6 +14,52 @@ import {
   formatTotalCost,
 } from "../src/agent/cost";
 import { buildStepGoal } from "../src/agent/planner";
+
+describe("private DNS resolution", () => {
+  it("allows a public hostname", async () => {
+    const lookupFn = vi.fn(async () => [{ address: "93.184.216.34" }]);
+
+    expect(await resolvesToPrivate("example.com", lookupFn)).toBe(false);
+    expect(lookupFn).toHaveBeenCalledWith("example.com", { all: true });
+  });
+
+  it("blocks a hostname resolving to loopback", async () => {
+    const lookupFn = vi.fn(async () => [{ address: "127.0.0.1" }]);
+
+    expect(await resolvesToPrivate("loopback.example", lookupFn)).toBe(true);
+  });
+
+  it("blocks a hostname when any DNS answer is private", async () => {
+    const lookupFn = vi.fn(async () => [
+      { address: "93.184.216.34" },
+      { address: "10.1.2.3" },
+    ]);
+
+    expect(await resolvesToPrivate("mixed.example", lookupFn)).toBe(true);
+  });
+
+  it("blocks a hostname when DNS lookup fails", async () => {
+    const lookupFn = vi.fn(async () => {
+      throw new Error("DNS lookup failed");
+    });
+
+    expect(await resolvesToPrivate("unresolved.example", lookupFn)).toBe(true);
+  });
+
+  it("blocks localhost without performing a DNS lookup", async () => {
+    const lookupFn = vi.fn(async () => [{ address: "93.184.216.34" }]);
+
+    expect(await resolvesToPrivate("localhost", lookupFn)).toBe(true);
+    expect(lookupFn).not.toHaveBeenCalled();
+  });
+
+  it("allows a public IP literal without performing a DNS lookup", async () => {
+    const lookupFn = vi.fn(async () => [{ address: "127.0.0.1" }]);
+
+    expect(await resolvesToPrivate("8.8.8.8", lookupFn)).toBe(false);
+    expect(lookupFn).not.toHaveBeenCalled();
+  });
+});
 
 describe("browser helpers", () => {
   let browser: Browser;
