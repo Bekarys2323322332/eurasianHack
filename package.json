@@ -2,10 +2,16 @@
   "name": "eurasianhack",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "setup": "node scripts/setup.mjs",
+    "demo": "next build && next start -p 3000",
+    "tunnel": "node scripts/tunnel.mjs",
     "lint": "eslint",
     "test": "vitest run",
     "validate:fixture": "tsx scripts/validate-step-file.ts fixtures/fake-job/steps.json",
