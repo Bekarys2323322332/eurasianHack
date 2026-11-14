@@ -220,6 +220,7 @@ export const JobVideo: React.FC<VideoProps> = ({ stepFile, aspect, style, music,
         ))}
 
         <Sequence from={endFrom} durationInFrames={endFrames}>
+          {sfx ? <Audio src={staticFile("sfx/chime.wav")} volume={SFX.chime} /> : null}
           {howto ? (
             <RecapCard
               heading={howToTitle}
@@ -247,11 +248,12 @@ export const JobVideo: React.FC<VideoProps> = ({ stepFile, aspect, style, music,
 
 /** One step: cursor glide, zoom in, click, change of picture, zoom out. */
 /** Sound effect volumes, kept under the narration. */
-const SFX = { click: 0.9, whoosh: 0.5, key: 0.4, keyEveryFrames: 3, maxKeys: 10 };
+const SFX = { click: 0.85, whoosh: 0.75, key: 0.6, pop: 0.6, chime: 0.9, keyEveryFrames: 3, maxKeys: 10 };
 
 /** Short sounds that line up with what the viewer sees: a whoosh as the scene arrives, a click, key ticks. */
-const SceneSounds: React.FC<{ scene: Scene }> = ({ scene }) => {
+const SceneSounds: React.FC<{ scene: Scene; hasCaption: boolean }> = ({ scene, hasCaption }) => {
   const { plan } = scene;
+  const popAt = Math.min(4, Math.max(0, scene.frames - 2));
   const keys: number[] = [];
   if (plan.typing) {
     for (let at = plan.typing.start; at < plan.typing.end && keys.length < SFX.maxKeys; at += SFX.keyEveryFrames) {
@@ -263,6 +265,11 @@ const SceneSounds: React.FC<{ scene: Scene }> = ({ scene }) => {
       {scene.from > 0 ? (
         <Sequence from={0} durationInFrames={Math.min(scene.frames, 20)}>
           <Audio src={staticFile("sfx/whoosh.wav")} volume={SFX.whoosh} />
+        </Sequence>
+      ) : null}
+      {hasCaption && scene.frames > 6 ? (
+        <Sequence from={popAt} durationInFrames={Math.min(scene.frames - popAt, 8)}>
+          <Audio src={staticFile("sfx/pop.wav")} volume={SFX.pop} />
         </Sequence>
       ) : null}
       {plan.rippleAt !== null && plan.rippleAt < scene.frames - 1 ? (
@@ -451,7 +458,7 @@ const SceneView: React.FC<{
       </AbsoluteFill>
 
       <Vignette strength={0.6 + 0.4 * closeness} />
-      {sfx ? <SceneSounds scene={scene} /> : null}
+      {sfx ? <SceneSounds scene={scene} hasCaption={Boolean(step.caption)} /> : null}
       {step.audioFile ? <Audio src={staticFile(step.audioFile)} /> : null}
       {plan.typing && step.typedText ? (
         <TypingChip text={step.typedText} typing={plan.typing} aspect={aspect} />

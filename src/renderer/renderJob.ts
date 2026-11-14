@@ -101,7 +101,7 @@ function readStepFile(jobFolder: string): RenderStepFile {
  * cleared when the audio file is not on disk, so a missing voice file never
  * breaks the render.
  */
-const SFX_FILES = ["click.wav", "whoosh.wav", "key.wav"] as const;
+const SFX_FILES = ["click.wav", "whoosh.wav", "key.wav", "pop.wav", "chime.wav"] as const;
 
 function preparePublicFolder(
   jobFolder: string,
@@ -156,7 +156,7 @@ function preparePublicFolder(
   const hasMusic = wantMusic && musicSource !== undefined;
   if (wantMusic && musicSource) fs.copyFileSync(musicSource, path.join(publicDir, music.file));
 
-  // Sound effects (click, whoosh, key ticks) live in public/sfx; all three
+  // Sound effects (click, whoosh, key ticks, caption pop, end chime) live in public/sfx; all
   // must exist for the video to use them.
   const sfxDir = path.resolve("public", "sfx");
   const hasSfx = SFX_FILES.every((name) => fs.existsSync(path.join(sfxDir, name)));
