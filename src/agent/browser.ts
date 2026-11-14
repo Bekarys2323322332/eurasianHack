@@ -2,8 +2,13 @@
  * Browser helpers for inspecting public pages and applying the small set of
  * actions represented by the shared step-file contract.
  */
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import type { Page } from "playwright";
 import type { StepAction } from "../shared/stepFile";
+
+const PRIVATE_ADDRESS_MESSAGE =
+  "That address points to a private or local network, which the agent is not allowed to visit. Use a public web address.";
 
 /** A visible control described in the coordinate system of the current viewport. */
 export interface InteractiveElement {
@@ -25,6 +30,117 @@ export interface AgentAction {
   text: string | null;
   reason: string;
   done: boolean;
+}
+
+/** Normalize host syntax before checking names and IP literals. */
+function normalizeHostname(hostname: string): string {
+  const trimmed = hostname.trim().toLowerCase().replace(/\.$/, "");
+  return trimmed.startsWith("[") && trimmed.endsWith("]")
+    ? trimmed.slice(1, -1)
+    : trimmed;
+}
+
+/** Check the explicit private IPv4 ranges used by the agent's network guard. */
+function isPrivateIpv4(address: string): boolean {
+  const octets = address.split(".").map(Number);
+  const [first, second] = octets;
+  return (
+    first === 0 ||
+    first === 10 ||
+    first === 127 ||
+    (first === 172 && second >= 16 && second <= 31) ||
+    (first === 192 && second === 168) ||
+    (first === 169 && second === 254)
+  );
+}
+
+/** Expand a validated IPv6 literal into eight 16-bit words for range checks. */
+function ipv6Words(address: string): number[] {
+  let normalized = address;
+  const ipv4Tail = normalized.match(/(.*:)(\d+\.\d+\.\d+\.\d+)$/);
+  if (ipv4Tail) {
+    const octets = ipv4Tail[2].split(".").map(Number);
+    const firstWord = ((octets[0] << 8) | octets[1]).toString(16);
+    const secondWord = ((octets[2] << 8) | octets[3]).toString(16);
+    normalized = `${ipv4Tail[1]}${firstWord}:${secondWord}`;
+  }
+
+  const [leftSide, rightSide, ...extra] = normalized.split("::");
+  if (extra.length > 0) return [];
+  const parseSide = (side: string) =>
+    side ? side.split(":").map((word) => Number.parseInt(word, 16)) : [];
+  const left = parseSide(leftSide);
+  const right = parseSide(rightSide ?? "");
+
+  if (rightSide === undefined) return left.length === 8 ? left : [];
+  const missingWords = 8 - left.length - right.length;
+  if (missingWords < 1) return [];
+  return [...left, ...Array<number>(missingWords).fill(0), ...right];
+}
+
+/** Check whether an IPv6 literal belongs to loopback, unspecified, ULA, or link-local space. */
+function isPrivateIpv6(address: string): boolean {
+  const words = ipv6Words(address);
+  if (words.length !== 8) return false;
+  if (words.every((word) => word === 0)) return true;
+  if (words.slice(0, 7).every((word) => word === 0) && words[7] === 1) return true;
+
+  if ((words[0] & 0xfe00) === 0xfc00) return true;
+  if ((words[0] & 0xffc0) === 0xfe80) return true;
+
+  const isIpv4Mapped =
+    words.slice(0, 5).every((word) => word === 0) && words[5] === 0xffff;
+  if (isIpv4Mapped) {
+    const first = words[6] >> 8;
+    const second = words[6] & 0xff;
+    const third = words[7] >> 8;
+    const fourth = words[7] & 0xff;
+    return isPrivateIpv4(`${first}.${second}.${third}.${fourth}`);
+  }
+  return false;
+}
+
+/** Identify hostnames and IP literals that must never be opened by the agent. */
+export function isPrivateHost(hostname: string): boolean {
+  const normalized = normalizeHostname(hostname);
+  if (
+    normalized === "localhost" ||
+    normalized.endsWith(".localhost") ||
+    normalized === "local" ||
+    normalized.endsWith(".local")
+  ) {
+    return true;
+  }
+
+  const address = normalized.split("%", 1)[0];
+  const addressVersion = isIP(address);
+  if (addressVersion === 4) return isPrivateIpv4(address);
+  if (addressVersion === 6) return isPrivateIpv6(address);
+  return false;
+}
+
+/**
+ * Reject private URL hosts and DNS answers before the browser starts.
+ * DNS is checked only once; a DNS-rebinding change between this check and a
+ * later request is accepted for now, while the browser route still blocks
+ * private IP literals on every request.
+ */
+export async function assertPublicUrl(url: string): Promise<void> {
+  const parsedUrl = new URL(url);
+  if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+    throw new Error("The page URL must use HTTP or HTTPS.");
+  }
+
+  const hostname = normalizeHostname(parsedUrl.hostname);
+  if (isPrivateHost(hostname)) {
+    throw new Error(PRIVATE_ADDRESS_MESSAGE);
+  }
+
+  if (isIP(hostname) !== 0) return;
+  const addresses = await lookup(hostname, { all: true });
+  if (addresses.some(({ address }) => isPrivateHost(address))) {
+    throw new Error(PRIVATE_ADDRESS_MESSAGE);
+  }
 }
 
 /** Collect visible page copy while excluding common hidden or non-content nodes. */
@@ -188,7 +304,8 @@ export async function performBrowserAction(
   }
 
   if (action.action === "click") {
-    await page.locator(`[data-agent-element="${target!.number}"]`).click({ timeout: 5_000 });
+    const locator = page.locator(`[data-agent-element="${target!.number}"]`);
+    await locator.click({ timeout: 5_000 });
     return { target, typedText: null };
   }
 

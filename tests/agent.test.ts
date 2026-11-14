@@ -3,6 +3,7 @@ import { chromium, type Browser, type Page } from "playwright";
 import {
   detectLoginWall,
   extractInteractiveElements,
+  isPrivateHost,
 } from "../src/agent/browser";
 
 describe("browser helpers", () => {
@@ -19,6 +20,24 @@ describe("browser helpers", () => {
 
   afterAll(async () => {
     await browser.close();
+  });
+
+  it("identifies private and local hostnames and IP literals", () => {
+    for (const hostname of [
+      "localhost",
+      "127.0.0.1",
+      "10.1.2.3",
+      "172.20.0.1",
+      "192.168.1.1",
+      "169.254.169.254",
+      "[::1]",
+      "foo.local",
+    ]) {
+      expect(isPrivateHost(hostname), hostname).toBe(true);
+    }
+
+    expect(isPrivateHost("example.com")).toBe(false);
+    expect(isPrivateHost("8.8.8.8")).toBe(false);
   });
 
   it("numbers visible controls, tags their DOM nodes, and reports viewport centres", async () => {

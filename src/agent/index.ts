@@ -26,9 +26,11 @@ import {
   type ModelResult,
 } from "../llm";
 import {
+  assertPublicUrl,
   detectLoginWall,
   extractInteractiveElements,
   extractVisibleText,
+  isPrivateHost,
   performBrowserAction,
   type AgentAction,
   type InteractiveElement,
@@ -157,8 +159,28 @@ export async function runAgent(
     await mkdir(stepsDir, { recursive: true });
     await persistCostFile(costFilePath, costFile);
 
+    await assertPublicUrl(job.url);
     browser = await chromium.launch({ headless: true });
-    const page = await browser.newPage({ viewport: VIEWPORT });
+    const context = await browser.newContext({
+      viewport: VIEWPORT,
+      serviceWorkers: "block",
+    });
+    await context.route("**/*", async (route) => {
+      let hostname: string;
+      try {
+        hostname = new URL(route.request().url()).hostname;
+      } catch {
+        await route.abort();
+        return;
+      }
+
+      if (isPrivateHost(hostname)) {
+        await route.abort();
+      } else {
+        await route.continue();
+      }
+    });
+    const page = await context.newPage();
     await page.goto(job.url, { waitUntil: "domcontentloaded", timeout: 30_000 });
     await page.waitForTimeout(500);
     if (await detectLoginWall(page)) {
