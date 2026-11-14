@@ -86,7 +86,10 @@ export async function generateVoice(
   if (!fs.existsSync(stepsPath)) {
     throw new Error(`No steps.json found in ${jobFolder}. Run the agent first.`);
   }
-  const checked = validateStepFile(JSON.parse(fs.readFileSync(stepsPath, "utf8")));
+  // The file exactly as it is on disk. It is kept so that fields the shared
+  // step file type does not know about yet are still there after saving.
+  const raw = JSON.parse(fs.readFileSync(stepsPath, "utf8"));
+  const checked = validateStepFile(raw);
   if (!checked.ok) {
     throw new Error(`steps.json in ${jobFolder} is not valid:\n${checked.errors.join("\n")}`);
   }
@@ -147,8 +150,18 @@ export async function generateVoice(
     }
   }
 
-  // Everything else in steps.json is written back unchanged.
-  fs.writeFileSync(stepsPath, `${JSON.stringify(stepFile, null, 2)}\n`);
+  // Only the two audio fields are changed. They are copied into the file as
+  // it was read, not into the checked copy, because the checker drops any
+  // field it does not know (for example a step's "keyWord"), and saving the
+  // checked copy would silently delete those.
+  const audioById = new Map(stepFile.steps.map((step) => [step.id, step]));
+  for (const rawStep of raw.steps) {
+    const voiced = audioById.get(rawStep.id);
+    if (!voiced) continue;
+    rawStep.audioFile = voiced.audioFile;
+    rawStep.audioSeconds = voiced.audioSeconds;
+  }
+  fs.writeFileSync(stepsPath, `${JSON.stringify(raw, null, 2)}\n`);
 
   // The provider bills per character of text. Only lines it actually spoke
   // in this run count: cached lines cost nothing, and a line that failed

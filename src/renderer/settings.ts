@@ -131,6 +131,12 @@ const base = {
       windowWidth: 1440,
       /** Vertical centre of the window. */
       windowCenterY: 490,
+      /**
+       * How big the page is shown between actions (1 is its natural size in
+       * the window). Above 1 the camera stays slightly zoomed in and follows
+       * the cursor, which keeps real pages readable in the narrow 9:16 shape.
+       */
+      restZoom: 1,
       /** How much bigger the picture gets around the click spot. */
       zoom: 1.6,
       /**
@@ -142,6 +148,7 @@ const base = {
     "9:16": {
       windowWidth: 1040,
       windowCenterY: 780,
+      restZoom: 1.45,
       zoom: 2.2,
       zoomPullToCenter: 0.7,
     },
@@ -183,11 +190,20 @@ const base = {
     cardSubtitle: "rgba(255, 255, 255, 0.78)",
   },
 
-  /** Caption text size and distance from the bottom edge. */
+  /**
+   * Caption text size and distance from the bottom edge. A caption that
+   * would need more than maxLines lines is drawn smaller until it fits.
+   */
   caption: {
-    "16:9": { fontSize: 42, bottom: 48 },
-    "9:16": { fontSize: 64, bottom: 330 },
+    "16:9": { fontSize: 42, bottom: 48, maxLines: 2 },
+    "9:16": { fontSize: 64, bottom: 330, maxLines: 3 },
   },
+
+  /**
+   * Titles on the cards never take more lines than this. Longer titles are
+   * drawn smaller, and cut off with "..." if they are still too long.
+   */
+  cardTitleMaxLines: 3,
 
   /** The chip that shows typed text letter by letter. Sits above the caption. */
   typingChip: {
@@ -271,8 +287,8 @@ const trailer: Settings = {
   },
   timing: paced(0.8),
   layout: {
-    "16:9": { windowWidth: 1360, windowCenterY: 450, zoom: 1.9, zoomPullToCenter: 0.35 },
-    "9:16": { windowWidth: 1040, windowCenterY: 760, zoom: 2.6, zoomPullToCenter: 0.7 },
+    "16:9": { windowWidth: 1360, windowCenterY: 450, restZoom: 1, zoom: 1.9, zoomPullToCenter: 0.45 },
+    "9:16": { windowWidth: 1040, windowCenterY: 760, restZoom: 1.5, zoom: 2.6, zoomPullToCenter: 0.7 },
   },
   window: {
     ...base.window,
@@ -289,8 +305,8 @@ const trailer: Settings = {
     cursorEdge: "#111111",
   },
   caption: {
-    "16:9": { fontSize: 78, bottom: 64 },
-    "9:16": { fontSize: 92, bottom: 360 },
+    "16:9": { fontSize: 78, bottom: 64, maxLines: 2 },
+    "9:16": { fontSize: 92, bottom: 360, maxLines: 3 },
   },
   typingChip: {
     "16:9": { fontSize: 42, bottom: 200 },
@@ -328,8 +344,8 @@ const tutorial: Settings = {
     paddingAfterAudio: 1.2,
   },
   layout: {
-    "16:9": { windowWidth: 1400, windowCenterY: 480, zoom: 1.3, zoomPullToCenter: 0.35 },
-    "9:16": { windowWidth: 1000, windowCenterY: 800, zoom: 1.7, zoomPullToCenter: 0.7 },
+    "16:9": { windowWidth: 1400, windowCenterY: 480, restZoom: 1, zoom: 1.3, zoomPullToCenter: 0.35 },
+    "9:16": { windowWidth: 1000, windowCenterY: 800, restZoom: 1.4, zoom: 1.9, zoomPullToCenter: 0.7 },
   },
   window: {
     ...base.window,
@@ -349,8 +365,8 @@ const tutorial: Settings = {
   caption: {
     // For the bar design, "bottom" is extra space under the text inside
     // the bar (phones often cover the very bottom edge).
-    "16:9": { fontSize: 34, bottom: 0 },
-    "9:16": { fontSize: 46, bottom: 70 },
+    "16:9": { fontSize: 34, bottom: 0, maxLines: 2 },
+    "9:16": { fontSize: 54, bottom: 70, maxLines: 3 },
   },
   typingChip: {
     "16:9": { fontSize: 36, bottom: 130 },
@@ -394,8 +410,8 @@ const social: Settings = {
   },
   layout: {
     // The page fills the full width of the frame in both shapes.
-    "16:9": { windowWidth: 1920, windowCenterY: 540, zoom: 1.5, zoomPullToCenter: 0.5 },
-    "9:16": { windowWidth: 1080, windowCenterY: 700, zoom: 2.2, zoomPullToCenter: 0.7 },
+    "16:9": { windowWidth: 1920, windowCenterY: 540, restZoom: 1, zoom: 1.5, zoomPullToCenter: 0.5 },
+    "9:16": { windowWidth: 1080, windowCenterY: 700, restZoom: 1.6, zoom: 2.4, zoomPullToCenter: 0.7 },
   },
   window: { ...base.window, cornerRadius: 0, shadow: "0 0 90px rgba(0, 0, 0, 0.65)" },
   cursor: { size: 64, markSize: 190 },
@@ -408,8 +424,8 @@ const social: Settings = {
     cursorEdge: "#111111",
   },
   caption: {
-    "16:9": { fontSize: 88, bottom: 70 },
-    "9:16": { fontSize: 124, bottom: 380 },
+    "16:9": { fontSize: 88, bottom: 70, maxLines: 2 },
+    "9:16": { fontSize: 116, bottom: 300, maxLines: 3 },
   },
   typingChip: {
     "16:9": { fontSize: 46, bottom: 240 },

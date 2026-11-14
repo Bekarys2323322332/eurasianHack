@@ -66,6 +66,63 @@ const POP = { ...CLAMP, easing: Easing.out(Easing.cubic) };
  */
 const fadeFrames = (seconds: number) => Math.max(1, toFrames(seconds));
 
+/** Keep a number between two limits. */
+const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+
+/** How many lines a text needs when a line holds this many characters. */
+function linesNeeded(words: string[], charsPerLine: number): number {
+  let lines = 1;
+  let used = 0;
+  for (const word of words) {
+    if (used > 0 && used + 1 + word.length > charsPerLine) {
+      lines += 1;
+      used = word.length;
+    } else {
+      used += (used > 0 ? 1 : 0) + word.length;
+    }
+  }
+  return lines;
+}
+
+/**
+ * Shrink a text size until the text fits in the given width and number of
+ * lines, and its longest word fits on one line. Real page titles and
+ * captions can be far longer than the ones the sizes were tuned for.
+ *
+ * The browser is not asked to measure anything (that would not be reliable
+ * frame by frame). Instead the width of a letter is estimated as a share of
+ * the text size: about 0.62 for bold capitals, about 0.55 for normal text.
+ * Stops at about a third of the starting size.
+ */
+function fitTextSize(
+  text: string,
+  size: number,
+  maxWidth: number,
+  maxLines: number,
+  letterWidth: number,
+): number {
+  const words = text.split(/\s+/).filter(Boolean);
+  const longest = Math.max(1, ...words.map((word) => word.length));
+  let fitted = size;
+  for (let attempt = 0; attempt < 13; attempt++) {
+    const charsPerLine = Math.floor(maxWidth / (fitted * letterWidth));
+    if (charsPerLine >= longest && linesNeeded(words, charsPerLine) <= maxLines) break;
+    fitted *= 0.92;
+  }
+  return fitted;
+}
+
+/** CSS that cuts text off with "..." after a number of lines. */
+const clampLines = (lines: number): React.CSSProperties => ({
+  display: "-webkit-box",
+  WebkitBoxOrient: "vertical",
+  WebkitLineClamp: lines,
+  overflow: "hidden",
+});
+
+/** Letters and digits only, in lower case, for comparing words and titles. */
+const bare = (text: string) => text.replace(/[^\p{L}\p{N}]/gu, "").toLowerCase();
+
 /** "https://example.com/" becomes "example.com" for display. */
 const prettyUrl = (url: string) => url.replace(/^https?:\/\//, "").replace(/\/$/, "");
 
@@ -134,8 +191,9 @@ export const JobVideo: React.FC<VideoProps> = ({ stepFile, aspect, style, music 
               // How-to videos open with what the viewer will learn.
               <Card
                 title={howToTitle}
-                subtitle={stepFile.title}
-                smallTitle
+                // The planner often names the video after the goal. Showing
+                // the same words twice looks like a mistake, so skip it then.
+                subtitle={bare(howToTitle).includes(bare(stepFile.title)) ? "" : stepFile.title}
                 frames={titleFrames}
                 aspect={aspect}
               />
@@ -199,7 +257,7 @@ const SceneView: React.FC<{
   const { step, plan } = scene;
   const t = settings.timing;
   const { look } = settings;
-  const { zoom, zoomPullToCenter } = settings.layout[aspect];
+  const { zoom, restZoom, zoomPullToCenter } = settings.layout[aspect];
 
   // Cursor: travels from the previous step's spot to this step's spot.
   const glide = interpolate(
@@ -231,12 +289,41 @@ const SceneView: React.FC<{
       )
     : 0;
 
-  // Scaling around the click spot keeps that spot fixed on screen. On top of
-  // that the spot is nudged towards the middle so it is not stuck at an edge.
+  // The camera always looks at the cursor. Between actions the page is shown
+  // at restZoom (1 in the wide shape, larger in the tall shape so real pages
+  // stay readable), and it moves in to "zoom" around a click.
   const focus = layout.toFrame(scene.endX, scene.endY);
+  const scale = restZoom + (zoom - restZoom) * zoomAmount;
+  // 0 at natural size, 1 when fully zoomed in.
+  const closeness = zoom > 1 ? (scale - 1) / (zoom - 1) : 0;
+
+  // Scaling around the cursor keeps it fixed on screen. The closer the
+  // camera, the further the cursor is nudged towards the middle of the frame
+  // so it is not stuck at an edge.
   const middle = { x: layout.frame.width / 2, y: settings.layout[aspect].windowCenterY };
-  const shiftX = (middle.x - focus.x) * zoomPullToCenter * zoomAmount;
-  const shiftY = (middle.y - focus.y) * zoomPullToCenter * zoomAmount;
+  let landX = cursor.x + (middle.x - cursor.x) * zoomPullToCenter * closeness;
+  let landY = cursor.y + (middle.y - cursor.y) * zoomPullToCenter * closeness;
+
+  // Never leave the spot being clicked underneath the caption: when it sits
+  // low on the page, lift it clear as the camera moves in.
+  const captionSize = settings.caption[aspect];
+  const captionTop =
+    layout.frame.height - captionSize.bottom - captionSize.fontSize * 2.6;
+  if (cursor.y > captionTop) {
+    landY = Math.min(landY, cursor.y + (captionTop - cursor.y) * closeness);
+  }
+
+  // When the enlarged page is wider than the frame, do not slide it so far
+  // that empty background shows beside it.
+  const edge = layout.window.left;
+  const mostRight = edge + (cursor.x - layout.window.left) * scale;
+  const mostLeft =
+    layout.frame.width - edge - (layout.window.left + layout.window.width - cursor.x) * scale;
+  if (mostLeft <= mostRight) landX = clamp(landX, mostLeft, mostRight);
+
+  // Scroll steps: how far the page moved, as a share of its height. Unknown
+  // means a full screen, which looks like one page pushing the other away.
+  const scrollShift = step.scrollShift ?? 1;
 
   // Change of picture: 0 shows "before", 1 shows "after".
   const change =
@@ -265,6 +352,7 @@ const SceneView: React.FC<{
       {look.backdrop === "blurredPage" ? (
         <BlurredBackdrop
           file={change < 0.5 ? step.screenshotBefore : step.screenshotAfter}
+          frame={layout.frame}
         />
       ) : null}
 
@@ -273,8 +361,8 @@ const SceneView: React.FC<{
       >
         <AbsoluteFill
           style={{
-            transformOrigin: `${focus.x}px ${focus.y}px`,
-            transform: `translate(${shiftX}px, ${shiftY}px) scale(${1 + (zoom - 1) * zoomAmount})`,
+            transformOrigin: `${cursor.x}px ${cursor.y}px`,
+            transform: `translate(${landX - cursor.x}px, ${landY - cursor.y}px) scale(${scale})`,
           }}
         >
           <PageFrame layout={layout} address={address}>
@@ -282,19 +370,34 @@ const SceneView: React.FC<{
               Both screenshots are always mounted. That way Remotion has both
               images loaded before the change and there is no empty flash.
             */}
-            <Screenshot
-              file={step.screenshotBefore}
-              // A scroll pushes the old picture up and out of the window.
-              shiftPercent={plan.transition === "slide" ? -100 * change : 0}
-              opacity={1}
-            />
-            <Screenshot
-              file={step.screenshotAfter}
-              // A scroll brings the new picture up from below. Cuts and fades
-              // lay it on top and change how see-through it is.
-              shiftPercent={plan.transition === "slide" ? 100 * (1 - change) : 0}
-              opacity={plan.transition === "slide" ? 1 : change}
-            />
+            {plan.transition === "slide" ? (
+              <>
+                {/*
+                  A scroll is a vertical pan. The "after" picture sits below
+                  the "before" picture by exactly the distance the page
+                  moved, and both travel up together, so the part they share
+                  lines up and the page appears to scroll. "Before" stays on
+                  top while moving (so a header that sticks to the top of the
+                  page does not appear twice) and fades away at the end.
+                */}
+                <Screenshot
+                  file={step.screenshotAfter}
+                  shiftPercent={100 * scrollShift * (1 - change)}
+                  opacity={1}
+                />
+                <Screenshot
+                  file={step.screenshotBefore}
+                  shiftPercent={-100 * scrollShift * change}
+                  opacity={interpolate(change, [0.8, 1], [1, 0], CLAMP)}
+                />
+              </>
+            ) : (
+              <>
+                {/* Cuts and fades lay "after" on top and make it less see-through. */}
+                <Screenshot file={step.screenshotBefore} shiftPercent={0} opacity={1} />
+                <Screenshot file={step.screenshotAfter} shiftPercent={0} opacity={change} />
+              </>
+            )}
           </PageFrame>
           {plan.rippleAt !== null ? <ClickMark at={plan.rippleAt} x={focus.x} y={focus.y} /> : null}
           <Cursor x={cursor.x} y={cursor.y} clickAt={plan.rippleAt} />
@@ -306,7 +409,12 @@ const SceneView: React.FC<{
         <TypingChip text={step.typedText} typing={plan.typing} aspect={aspect} />
       ) : null}
       {step.caption ? (
-        <Caption text={step.caption} aspect={aspect} sceneFrames={scene.frames} />
+        <Caption
+          text={step.caption}
+          keyWord={step.keyWord ?? null}
+          aspect={aspect}
+          sceneFrames={scene.frames}
+        />
       ) : null}
     </AbsoluteFill>
   );
@@ -317,20 +425,39 @@ const SceneView: React.FC<{
  * styles that have no window, so the picture reaches every edge even when
  * the page is a different shape from the video.
  */
-const BlurredBackdrop: React.FC<{ file: string }> = ({ file }) => (
-  <Img
-    src={staticFile(file)}
-    alt=""
+const BlurredBackdrop: React.FC<{ file: string; frame: { width: number; height: number } }> = ({
+  file,
+  frame,
+}) => (
+  // Blurring a full-size picture on every frame is slow. A blurred picture
+  // has no fine detail anyway, so it is drawn at one eighth of the size with
+  // a small blur and then stretched to fill the frame. It looks the same and
+  // renders several times faster.
+  <div
     style={{
       position: "absolute",
-      width: "100%",
-      height: "100%",
-      objectFit: "cover",
-      // Scaled up a little so the soft blurred edge is outside the frame.
-      transform: "scale(1.25)",
-      filter: "blur(36px) brightness(0.42) saturate(1.3)",
+      left: 0,
+      top: 0,
+      width: frame.width / 8,
+      height: frame.height / 8,
+      overflow: "hidden",
+      transform: "scale(8)",
+      transformOrigin: "0 0",
     }}
-  />
+  >
+    <Img
+      src={staticFile(file)}
+      alt=""
+      style={{
+        width: "100%",
+        height: "100%",
+        objectFit: "cover",
+        // Scaled up a little so the soft blurred edge is outside the frame.
+        transform: "scale(1.25)",
+        filter: "blur(4.5px) brightness(0.42) saturate(1.3)",
+      }}
+    />
+  </div>
 );
 
 /**
@@ -577,8 +704,16 @@ const TypingChip: React.FC<{
   );
 };
 
+interface CaptionProps {
+  text: string;
+  /** The word to highlight, when the step file names one. */
+  keyWord: string | null;
+  aspect: Aspect;
+  sceneFrames: number;
+}
+
 /** Picks the caption design of the active style. */
-const Caption: React.FC<{ text: string; aspect: Aspect; sceneFrames: number }> = (props) => {
+const Caption: React.FC<CaptionProps> = (props) => {
   const settings = useSettings();
   const { captionDesign } = settings.look;
   if (captionDesign === "bar") return <BarCaption {...props} />;
@@ -608,14 +743,17 @@ const Caption: React.FC<{ text: string; aspect: Aspect; sceneFrames: number }> =
  * Trailer caption: big bold text with no box behind it. The words pop in
  * one after another, spread over the first part of the scene.
  */
-const WordsCaption: React.FC<{ text: string; aspect: Aspect; sceneFrames: number }> = ({
-  text,
-  aspect,
-  sceneFrames,
-}) => {
+const WordsCaption: React.FC<CaptionProps> = ({ text, aspect, sceneFrames }) => {
   const frame = useCurrentFrame();
   const settings = useSettings();
-  const { fontSize, bottom } = settings.caption[aspect];
+  const { bottom, maxLines } = settings.caption[aspect];
+  const fontSize = fitTextSize(
+    text,
+    settings.caption[aspect].fontSize,
+    settings.sizes[aspect].width - 96,
+    maxLines,
+    0.62,
+  );
   const words = text.split(/\s+/).filter(Boolean);
   // Frames between one word and the next: slower for short captions in long
   // scenes, but always between 2 and 7 so it never drags or blurs together.
@@ -663,10 +801,17 @@ const WordsCaption: React.FC<{ text: string; aspect: Aspect; sceneFrames: number
  * frame. The bar itself never moves; only the text fades in.
  * The "bottom" setting is extra space under the text inside the bar.
  */
-const BarCaption: React.FC<{ text: string; aspect: Aspect }> = ({ text, aspect }) => {
+const BarCaption: React.FC<CaptionProps> = ({ text, aspect }) => {
   const frame = useCurrentFrame();
   const settings = useSettings();
-  const { fontSize, bottom } = settings.caption[aspect];
+  const { bottom, maxLines } = settings.caption[aspect];
+  const fontSize = fitTextSize(
+    text,
+    settings.caption[aspect].fontSize,
+    settings.sizes[aspect].width - 120,
+    maxLines,
+    0.55,
+  );
   const opacity = interpolate(frame, [0, fadeFrames(settings.timing.softFadeSeconds)], [0, 1], CLAMP);
   return (
     <div
@@ -692,25 +837,34 @@ const BarCaption: React.FC<{ text: string; aspect: Aspect }> = ({ text, aspect }
   );
 };
 
-/** Letters and digits only, for comparing word lengths without punctuation. */
-const bare = (word: string) => word.replace(/[^\p{L}\p{N}]/gu, "");
-
 /**
  * Social caption: very large centred text. The key word gets a block of the
  * accent colour behind it. The whole caption snaps in with a tiny pop.
  */
-const HighlightCaption: React.FC<{ text: string; aspect: Aspect }> = ({ text, aspect }) => {
+const HighlightCaption: React.FC<CaptionProps> = ({ text, keyWord, aspect }) => {
   const frame = useCurrentFrame();
   const settings = useSettings();
-  const { fontSize, bottom } = settings.caption[aspect];
-  const words = text.split(/\s+/).filter(Boolean);
-  // ponytail: the "key word" is simply the longest word (the first one when
-  // several tie). Good enough for short captions; have the script stage
-  // mark the key word if this picks badly.
-  const key = words.reduce(
-    (best, word, position) => (bare(word).length > bare(words[best]).length ? position : best),
-    0,
+  const { bottom, maxLines } = settings.caption[aspect];
+  const fontSize = fitTextSize(
+    text,
+    settings.caption[aspect].fontSize,
+    // Narrower than the frame: the highlight block adds padding of its own.
+    settings.sizes[aspect].width - 140,
+    maxLines,
+    0.62,
   );
+  const words = text.split(/\s+/).filter(Boolean);
+  // Which word gets the highlight (-1 for none). The step file can name it
+  // in "keyWord". Otherwise fall back to the longest word, but never one of
+  // three letters or fewer ("the", "you", "in" are never the point).
+  // ponytail: longest word is a guess; the script stage should set keyWord.
+  let key = keyWord ? words.findIndex((word) => bare(word) === bare(keyWord)) : -1;
+  if (key === -1) {
+    words.forEach((word, position) => {
+      const length = bare(word).length;
+      if (length > 3 && (key === -1 || length > bare(words[key]).length)) key = position;
+    });
+  }
   const pop = interpolate(frame, [0, 3], [0.9, 1], POP);
   return (
     <LowerThird bottom={bottom}>
@@ -811,17 +965,23 @@ const Card: React.FC<{
   subtitle: string;
   /** Make the smaller line bright and bold (used for the address). */
   strongSubtitle?: boolean;
-  /** Shrink the big line. Used when it is a whole sentence, not a name. */
-  smallTitle?: boolean;
   frames: number;
   aspect: Aspect;
-}> = ({ title, subtitle, strongSubtitle, smallTitle, frames, aspect }) => {
+}> = ({ title, subtitle, strongSubtitle, frames, aspect }) => {
   const frame = useCurrentFrame();
   const settings = useSettings();
   const bold = settings.look.cardDesign === "bold";
   const fade = fadeFrames(settings.timing.softFadeSeconds);
   const { subtitleSize } = settings.cards[aspect];
-  const titleSize = settings.cards[aspect].titleSize * (smallTitle ? 0.6 : 1);
+  // Long titles (real page titles can be a whole sentence) are drawn smaller
+  // so they fit in a few lines, and cut off with "..." past that.
+  const titleSize = fitTextSize(
+    title,
+    settings.cards[aspect].titleSize,
+    settings.sizes[aspect].width - 160,
+    settings.cardTitleMaxLines,
+    bold ? 0.62 : 0.55,
+  );
   const opacity = interpolate(frame, [0, fade, frames - fade, frames], [0, 1, 1, 0], CLAMP);
   const arrive = interpolate(frame, [0, 10], [0, 1], POP);
   // Bold cards land from slightly too big. Simple cards rise a little.
@@ -862,6 +1022,7 @@ const Card: React.FC<{
             letterSpacing: bold ? "-0.03em" : "0",
             textTransform: bold ? "uppercase" : "none",
             color: settings.colors.cardTitle,
+            ...clampLines(settings.cardTitleMaxLines),
           }}
         >
           {title}
@@ -924,8 +1085,8 @@ const RecapCard: React.FC<{
   const frame = useCurrentFrame();
   const settings = useSettings();
   const fade = fadeFrames(settings.timing.softFadeSeconds);
-  const { headingSize } = settings.recap[aspect];
-  const { height } = settings.sizes[aspect];
+  const { width, height } = settings.sizes[aspect];
+  const headingSize = fitTextSize(heading, settings.recap[aspect].headingSize, width - 180, 2, 0.6);
   const opacity = interpolate(frame, [0, fade, frames - fade, frames], [0, 1, 1, 0], CLAMP);
   // Shrink the list text when there are many steps, so the whole list fits
   // in about 60 percent of the frame height (each line takes about 1.7 times

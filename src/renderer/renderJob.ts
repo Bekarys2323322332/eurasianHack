@@ -5,16 +5,26 @@
  *     (percent) => console.log(percent));
  *
  * It reads <jobFolder>/steps.json and writes <jobFolder>/video-16x9.mp4 or
- * <jobFolder>/video-9x16.mp4. Server-side only (it starts a headless browser).
+ * <jobFolder>/video-9x16.mp4, plus <jobFolder>/poster.jpg (one frame from
+ * the middle of the video, for use as a thumbnail).
+ * Server-side only (it starts a headless browser).
  */
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { bundle } from "@remotion/bundler";
-import { renderMedia, selectComposition } from "@remotion/renderer";
+import { renderMedia, renderStill, selectComposition } from "@remotion/renderer";
 import { defaultStyle, settingsFor, type Style } from "./settings";
-import { validateStepFile, type StepFile } from "../shared/stepFile";
-import { visibleSteps, type Aspect, type VideoProps } from "./timeline";
+import { validateStepFile } from "../shared/stepFile";
+import { estimateScrollShift } from "./scrollShift";
+import {
+  buildTimeline,
+  posterFrame,
+  visibleSteps,
+  type Aspect,
+  type RenderStepFile,
+  type VideoProps,
+} from "./timeline";
 
 export interface RenderOptions {
   aspect: Aspect;
@@ -26,6 +36,24 @@ export interface RenderOptions {
    */
   style?: Style;
 }
+
+/**
+ * Share of the processor's cores used to draw frames at the same time.
+ * Higher is faster up to a point; 1 would leave nothing for the rest of the
+ * app while a video is being made.
+ */
+const RENDER_CORE_SHARE = 0.75;
+
+/**
+ * How the headless browser draws each frame. "angle" uses the computer's
+ * graphics chip, which made renders close to twice as fast on a Windows
+ * laptop (blur, zoom and large pictures are exactly what graphics chips are
+ * for). It is only asked for on Windows and macOS, where a graphics chip can
+ * be expected. Elsewhere (Linux servers, Docker) Remotion's own default is
+ * used, which draws in software and works everywhere.
+ */
+const FAST_GRAPHICS: "angle" | null =
+  process.platform === "win32" || process.platform === "darwin" ? "angle" : null;
 
 /**
  * Wraps the caller's progress callback so the numbers it receives are whole,
@@ -43,16 +71,28 @@ function steadyProgress(onProgress?: (percent: number) => void) {
 }
 
 /** Read and check steps.json. Errors say what is wrong in plain words. */
-function readStepFile(jobFolder: string): StepFile {
+function readStepFile(jobFolder: string): RenderStepFile {
   const file = path.join(jobFolder, "steps.json");
   if (!fs.existsSync(file)) {
     throw new Error(`No steps.json found in ${jobFolder}. Run the agent first.`);
   }
-  const result = validateStepFile(JSON.parse(fs.readFileSync(file, "utf8")));
+  const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+  const result = validateStepFile(raw);
   if (!result.ok) {
     throw new Error(`steps.json in ${jobFolder} is not valid:\n${result.errors.join("\n")}`);
   }
-  return result.stepFile;
+  // The shared validator drops fields it does not know. "keyWord" is one of
+  // those for now, so it is picked up from the raw file here.
+  const keyWords = new Map<string, string>();
+  for (const step of Array.isArray(raw?.steps) ? raw.steps : []) {
+    if (typeof step?.keyWord === "string" && step.keyWord.trim()) {
+      keyWords.set(step.id, step.keyWord.trim());
+    }
+  }
+  return {
+    ...result.stepFile,
+    steps: result.stepFile.steps.map((step) => ({ ...step, keyWord: keyWords.get(step.id) ?? null })),
+  };
 }
 
 /**
@@ -64,7 +104,7 @@ function readStepFile(jobFolder: string): StepFile {
 function preparePublicFolder(
   jobFolder: string,
   publicDir: string,
-  stepFile: StepFile,
+  stepFile: RenderStepFile,
   wantMusic: boolean,
   style: Style,
 ): VideoProps["stepFile"] & { hasMusic: boolean } {
@@ -83,12 +123,24 @@ function preparePublicFolder(
       }
       copy(shot);
     }
+    // For scroll steps, measure how far the page really moved so the video
+    // can pan by that amount.
+    const withShift =
+      step.action === "scroll"
+        ? {
+            ...step,
+            scrollShift: estimateScrollShift(
+              path.join(jobFolder, step.screenshotBefore),
+              path.join(jobFolder, step.screenshotAfter),
+            ),
+          }
+        : step;
     if (step.audioFile && fs.existsSync(path.join(jobFolder, step.audioFile))) {
       copy(step.audioFile);
-      return step;
+      return withShift;
     }
     // No usable audio: the scene falls back to the silent length.
-    return { ...step, audioFile: null, audioSeconds: null };
+    return { ...withShift, audioFile: null, audioSeconds: null };
   });
 
   // Music lives in the app's own public folder. The style's own file (for
@@ -149,13 +201,41 @@ export async function renderJob(
     // Step 2 (15 to 100 percent): draw every frame and encode the mp4.
     const composition = await selectComposition({ serveUrl, id: "JobVideo", inputProps });
     const outputLocation = path.join(jobFolder, `video-${options.aspect.replace(":", "x")}.mp4`);
-    await renderMedia({
+    const drawVideo = (graphics: "angle" | null) =>
+      renderMedia({
+        composition,
+        serveUrl,
+        codec: "h264",
+        outputLocation,
+        inputProps,
+        // Use most of the processor's cores. Remotion's own default is half
+        // of them, which left this laptop mostly idle during a render.
+        concurrency: Math.max(1, Math.floor(os.availableParallelism() * RENDER_CORE_SHARE)),
+        chromiumOptions: { gl: graphics },
+        onProgress: ({ progress }) => report(15 + progress * 80),
+      });
+    try {
+      await drawVideo(FAST_GRAPHICS);
+    } catch (error) {
+      // A computer without a usable graphics chip (or with a broken driver)
+      // can fail in fast mode. Software drawing is slower but always works,
+      // so try once more that way before giving up.
+      if (FAST_GRAPHICS === null) throw error;
+      console.warn("Fast drawing failed, trying again with software drawing:", error);
+      await drawVideo(null);
+    }
+
+    // Step 3 (95 to 100 percent): one frame as a thumbnail picture. It is
+    // replaced on every render, so it always matches the newest video.
+    await renderStill({
       composition,
       serveUrl,
-      codec: "h264",
-      outputLocation,
       inputProps,
-      onProgress: ({ progress }) => report(15 + progress * 85),
+      frame: posterFrame(buildTimeline(stepFile, settingsFor(style))),
+      imageFormat: "jpeg",
+      jpegQuality: 85,
+      output: path.join(jobFolder, "poster.jpg"),
+      overwrite: true,
     });
 
     report(100);
