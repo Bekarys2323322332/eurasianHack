@@ -5,7 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ZodType } from "zod";
 import { appendCostCall } from "../src/agent/cost";
 
-vi.mock("../src/llm", () => ({ callModel: vi.fn() }));
+vi.mock("../src/llm", async () => ({
+  ...(await vi.importActual<typeof import("../src/llm")>("../src/llm")),
+  callModel: vi.fn(),
+}));
 
 import { callModel } from "../src/llm";
 import { writeScript } from "../src/agent/script";
@@ -18,6 +21,7 @@ interface ScriptOutput {
 let jobFolder: string;
 let tempRoot: string;
 let previousDataDir: string | undefined;
+let previousStrongModel: string | undefined;
 
 function makeStep(
   id: string,
@@ -85,6 +89,8 @@ beforeEach(() => {
   fs.mkdirSync(jobFolder);
   previousDataDir = process.env.DATA_DIR;
   process.env.DATA_DIR = path.join(tempRoot, "data");
+  previousStrongModel = process.env.STRONG_MODEL;
+  process.env.STRONG_MODEL = "anthropic/claude-sonnet-5.5";
   vi.mocked(callModel).mockReset();
 });
 
@@ -92,6 +98,8 @@ afterEach(() => {
   fs.rmSync(tempRoot, { recursive: true, force: true });
   if (previousDataDir === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = previousDataDir;
+  if (previousStrongModel === undefined) delete process.env.STRONG_MODEL;
+  else process.env.STRONG_MODEL = previousStrongModel;
 });
 
 describe("writeScript", () => {
@@ -112,9 +120,13 @@ describe("writeScript", () => {
 
     expect(usage).toEqual({
       model: "anthropic/claude-sonnet-5.5",
+      tier: "strong",
       inputTokens: 120,
       outputTokens: 40,
       costUsd: 0.00064,
+      escalated: false,
+      cacheHit: false,
+      baselineCostUsd: 0.00064,
       cached: false,
     });
     expect(saved.steps[0]).toMatchObject({
@@ -212,12 +224,24 @@ describe("writeScript", () => {
     expect(first.cached).toBe(false);
     expect(second).toEqual({
       model: "cache",
+      tier: "strong",
       inputTokens: 0,
       outputTokens: 0,
       costUsd: 0,
+      cacheHit: true,
+      escalated: false,
+      baselineCostUsd: 0.00064,
       cached: true,
     });
     expect(callModel).toHaveBeenCalledTimes(1);
+
+    const cacheDir = path.join(process.env.DATA_DIR!, "script-cache");
+    const cacheFile = path.join(cacheDir, fs.readdirSync(cacheDir)[0]);
+    const cached = JSON.parse(fs.readFileSync(cacheFile, "utf8")) as {
+      inputTokens: number;
+      outputTokens: number;
+    };
+    expect(cached).toMatchObject({ inputTokens: 120, outputTokens: 40 });
   });
 
   it("misses the cache when the selected style changes", async () => {

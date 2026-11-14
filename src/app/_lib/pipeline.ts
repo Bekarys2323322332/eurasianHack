@@ -115,14 +115,16 @@ async function runPipeline(jobId: string) {
       languageName: LANGUAGES[job.language]?.label ?? "English",
       style: job.style,
     });
-    if (!scriptCall.cached) {
-      appendCostCall(jobFolder, "script", {
-        model: scriptCall.model,
-        inputTokens: scriptCall.inputTokens,
-        outputTokens: scriptCall.outputTokens,
-        costUsd: scriptCall.costUsd,
-      });
-    }
+    appendCostCall(jobFolder, "script", {
+      model: scriptCall.model,
+      inputTokens: scriptCall.inputTokens,
+      outputTokens: scriptCall.outputTokens,
+      costUsd: scriptCall.costUsd,
+      tier: scriptCall.tier,
+      escalated: scriptCall.escalated,
+      cacheHit: scriptCall.cacheHit,
+      baselineCostUsd: scriptCall.baselineCostUsd,
+    });
 
     stage = "recording the voice";
     updateJob(jobId, { status: "voicing", progressMessage: "Recording the voice" });
@@ -132,6 +134,7 @@ async function runPipeline(jobId: string) {
       inputTokens: 0,
       outputTokens: 0,
       costUsd: voiceSummary.totalCost,
+      cacheHit: voiceSummary.generated === 0 && voiceSummary.cached > 0,
     });
     if (voiceSummary.failed > 0) {
       console.warn(

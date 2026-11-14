@@ -498,6 +498,156 @@
   line-height: 1.5;
 }
 
+.costPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.costMetric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.costAmount {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.costExplanation,
+.costNumberNote,
+.costDetailLine {
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.costTableWrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.costTable {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.costTable th,
+.costTable td {
+  padding: 10px 6px;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.costTable th:first-child {
+  width: 38%;
+}
+
+.costTable th:nth-child(2) {
+  width: 24%;
+}
+
+.costTable th:nth-child(3) {
+  width: 38%;
+}
+
+.costTable thead th {
+  border-bottom: 1px solid var(--border);
+  font-weight: 700;
+}
+
+.costTable tbody tr + tr {
+  border-top: 1px solid var(--border);
+}
+
+.costTable .costTableNotes td {
+  padding-top: 2px;
+  border-top: 0;
+}
+
+.costTableNotes span {
+  display: block;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.costVoice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.costNumberNote {
+  display: block;
+  margin-top: 4px;
+}
+
+.costDetails > summary {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.costDetailsList {
+  display: flex;
+  flex-direction: column;
+}
+
+.costDetail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+
+.costDetailTitle {
+  font-size: 17px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.costDetailLine {
+  color: var(--foreground);
+}
+
+.costBadgeGroup {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.costBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  max-width: 100%;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--foreground);
+  font-size: 16px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 760px) {
   .page {
     padding: 20px 16px 48px;
