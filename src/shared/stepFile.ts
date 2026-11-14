@@ -60,6 +60,8 @@ export const stepSchema = z.object({
   errors: z.array(z.string()).optional(),
   /** Why a dead-end step did nothing, in plain words. */
   deadendReason: z.string().nullable().optional(),
+  /** What the page showed after the step: new text, an error, a result. */
+  observed: z.string().nullable().optional(),
 });
 
 export const stepFileSchema = z.object({
