@@ -6,10 +6,10 @@ import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-// Fail before installing packages when the current Node runtime is unsupported.
+// Fail before installing packages when the runtime cannot satisfy dependency engines.
 const nodeMajor = Number.parseInt(process.versions.node.split(".")[0], 10);
-if (nodeMajor < 20) {
-  console.error(`Node.js 20 or newer is required. Found ${process.versions.node}.`);
+if (nodeMajor < 22) {
+  console.error(`Node.js 22 or newer is required. Found ${process.versions.node}.`);
   process.exit(1);
 }
 

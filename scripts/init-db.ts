@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { getDataDir, getDb } from "../src/shared/jobs";
 
-// Node 20.12+ loads .env directly; older supported releases use the fallback below.
+// Node 22+ provides loadEnvFile; keep the fallback for runtimes that omit it.
 try {
   process.loadEnvFile?.(".env");
 } catch {
