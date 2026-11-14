@@ -286,27 +286,78 @@ const ACTION_LABELS: Record<Step["action"], (step: Step) => string> = {
   wait: () => "Waited for the page",
 };
 
+export interface StepEdit {
+  id: string;
+  hidden?: boolean;
+  narration?: string;
+  caption?: string;
+}
+
 function StepsPanel({
   jobId,
   stepFile,
   sceneStarts,
   onSelect,
+  onRerender,
 }: {
   jobId: string;
   stepFile: StepFile | null;
   /** Steps that have a scene in the video; trimmed steps are not clickable. */
   sceneStarts: Record<string, number>;
   onSelect: ((step: Step) => void) | null;
+  /** Save edits and build the video again; null when editing is not possible. */
+  onRerender: ((edits: StepEdit[]) => Promise<string | null>) | null;
 }) {
   const [showAll, setShowAll] = useState(false);
-  const steps = stepFile?.steps.filter((step) => !step.hidden) ?? [];
+  const [editing, setEditing] = useState(false);
+  const [edits, setEdits] = useState<Record<string, StepEdit>>({});
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const allSteps = stepFile?.steps ?? [];
+  const steps = editing ? allSteps : allSteps.filter((step) => !step.hidden);
   const deadends = steps.filter((step) => step.status === "deadend").length;
-  const shown = showAll ? steps : steps.slice(0, MAX_STEPS_SHOWN);
+  const shown = showAll || editing ? steps : steps.slice(0, MAX_STEPS_SHOWN);
+  const editList = Object.values(edits);
+
+  function editOf(step: Step): StepEdit {
+    return edits[step.id] ?? { id: step.id };
+  }
+  function changeStep(step: Step, change: Partial<StepEdit>) {
+    setEdits((current) => ({ ...current, [step.id]: { ...editOf(step), ...change } }));
+  }
+  function stopEditing() {
+    setEditing(false);
+    setEdits({});
+    setSaveError(null);
+  }
+  async function save() {
+    if (!onRerender) return;
+    setSaving(true);
+    setSaveError(null);
+    const problem = await onRerender(editList);
+    setSaving(false);
+    if (problem) setSaveError(problem);
+    else stopEditing();
+  }
+
   return (
     <section className={styles.panel} aria-labelledby="steps-title">
-      <h2 id="steps-title" className={styles.panelTitle}>
-        Steps
-      </h2>
+      <div className={styles.panelHeader}>
+        <h2 id="steps-title" className={styles.panelTitle}>
+          Steps
+        </h2>
+        {onRerender && steps.length > 0 && !editing && (
+          <button type="button" className={styles.secondaryLink} onClick={() => setEditing(true)}>
+            Edit
+          </button>
+        )}
+      </div>
+      {editing && (
+        <p className={styles.findingsSummary}>
+          Hide a step or reword its line, then press Re-render. The site is not explored again; only changed lines
+          are recorded again.
+        </p>
+      )}
       {steps.length === 0 ? (
         <p className={styles.panelEmpty}>
           Each step the agent took will appear here, with a picture and the reason for it.
@@ -321,6 +372,56 @@ function StepsPanel({
           <ol className={styles.findingsList}>
             {shown.map((step) => {
               const seekable = onSelect !== null && sceneStarts[step.id] !== undefined;
+              if (editing) {
+                const edit = editOf(step);
+                const hidden = edit.hidden ?? step.hidden;
+                return (
+                  <li key={step.id} className={hidden ? styles.stepHiddenCard : undefined}>
+                    <div className={styles.stepEditCard}>
+                      <div className={styles.stepEditHead}>
+                        <span className={styles.findingStep}>
+                          Step {step.index}
+                          {step.status === "deadend" && <span className={styles.stepDeadend}> Dead end</span>}
+                          {hidden && <span className={styles.stepDeadend}> Hidden</span>}
+                        </span>
+                        {step.status === "ok" && (
+                          <button
+                            type="button"
+                            className={styles.secondaryLink}
+                            onClick={() => changeStep(step, { hidden: !hidden })}
+                          >
+                            {hidden ? "Restore" : "Hide"}
+                          </button>
+                        )}
+                      </div>
+                      <span className={styles.stepAction}>{ACTION_LABELS[step.action](step)}</span>
+                      {step.status === "ok" && !hidden && (
+                        <>
+                          <label className={styles.stepEditLabel}>
+                            Narration
+                            <textarea
+                              className={styles.stepTextarea}
+                              rows={2}
+                              maxLength={500}
+                              value={edit.narration ?? step.narration ?? ""}
+                              onChange={(event) => changeStep(step, { narration: event.target.value })}
+                            />
+                          </label>
+                          <label className={styles.stepEditLabel}>
+                            Caption
+                            <input
+                              className={styles.input}
+                              maxLength={200}
+                              value={edit.caption ?? step.caption ?? ""}
+                              onChange={(event) => changeStep(step, { caption: event.target.value })}
+                            />
+                          </label>
+                        </>
+                      )}
+                    </div>
+                  </li>
+                );
+              }
               return (
                 <li key={step.id}>
                   <button
@@ -362,6 +463,17 @@ function StepsPanel({
               Show all {steps.length} steps
             </button>
           )}
+          {editing && (
+            <div className={styles.actions}>
+              <button type="button" className={styles.primary} onClick={save} disabled={saving || editList.length === 0}>
+                {saving ? "Saving..." : editList.length === 0 ? "Re-render" : `Re-render (${editList.length} ${editList.length === 1 ? "change" : "changes"})`}
+              </button>
+              <button type="button" className={styles.secondary} onClick={stopEditing} disabled={saving}>
+                Cancel
+              </button>
+            </div>
+          )}
+          {saveError && <p className={styles.error} role="alert">{saveError}</p>}
         </>
       )}
     </section>
@@ -471,6 +583,9 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
   const [cutLanguage, setCutLanguage] = useState<string | null>(null);
   const [translating, setTranslating] = useState(false);
   const [translateError, setTranslateError] = useState<string | null>(null);
+  const [format, setFormat] = useState<"16:9" | "9:16" | null>(null);
+  const [formatBusy, setFormatBusy] = useState(false);
+  const [formatError, setFormatError] = useState<string | null>(null);
   const [cutting, setCutting] = useState(false);
   const [cutError, setCutError] = useState<string | null>(null);
   const finished = view.job.status === "done" || view.job.status === "failed";
@@ -530,6 +645,35 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
       );
       setRetrying(false);
     }
+  }
+
+  /** Save edits and/or ask for the other format; voice and render run again without the agent. */
+  async function rerender(body: { aspect?: "16:9" | "9:16"; edits?: StepEdit[] }): Promise<string | null> {
+    try {
+      const response = await fetch(`/api/jobs/${view.job.id}/rerender`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error);
+      const fresh = await fetch(`/api/jobs/${view.job.id}`, { cache: "no-store" });
+      if (fresh.ok) setView(await fresh.json());
+      return null;
+    } catch (problem) {
+      return problem instanceof Error && problem.message
+        ? problem.message
+        : "We could not start the new video. Check your connection and try again.";
+    }
+  }
+
+  async function makeOtherFormat(aspect: "16:9" | "9:16") {
+    setFormatBusy(true);
+    setFormatError(null);
+    const problem = await rerender({ aspect });
+    setFormatBusy(false);
+    if (problem) setFormatError(problem);
+    else setFormat(aspect);
   }
 
   async function makeAnotherLanguage(language: string) {
@@ -707,15 +851,18 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
             onSelect={null}
             onCopy={copyFindings}
           />
-          <StepsPanel jobId={view.job.id} stepFile={view.stepFile} sceneStarts={{}} onSelect={null} />
+          <StepsPanel jobId={view.job.id} stepFile={view.stepFile} sceneStarts={{}} onSelect={null} onRerender={null} />
         </aside>
       </div>
     );
   }
 
   if (view.job.status === "done") {
-    const video = view.videos.landscape ?? view.videos.vertical;
-    const verticalVideo = !view.videos.landscape && Boolean(view.videos.vertical);
+    const hasBoth = Boolean(view.videos.landscape && view.videos.vertical);
+    const chosen = format ?? (view.videos.landscape ? "16:9" : "9:16");
+    const video = chosen === "9:16" && view.videos.vertical ? view.videos.vertical : view.videos.landscape ?? view.videos.vertical;
+    const verticalVideo = video !== null && video === view.videos.vertical;
+    const missingAspect: "16:9" | "9:16" | null = hasBoth ? null : view.videos.landscape ? "9:16" : view.videos.vertical ? "16:9" : null;
     const otherLanguages = Object.keys(LANGUAGES).filter((code) => code !== view.job.language);
     const selectedCutLanguage =
       cutLanguage && otherLanguages.includes(cutLanguage) ? cutLanguage : otherLanguages[0] ?? "en";
@@ -731,6 +878,7 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
           <h1 className={styles.pageTitle}>{title}</h1>
           {video ? (
             <video
+              key={video}
               ref={videoRef}
               className={`${styles.video} ${verticalVideo ? styles.videoVertical : ""}`}
               src={video}
@@ -748,10 +896,46 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
               <strong>Result:</strong> {view.stepFile.resultText.trim()}
             </p>
           )}
+          {(hasBoth || missingAspect) && (
+            <div className={styles.formatSwitch} role="group" aria-label="Video format">
+              {hasBoth ? (
+                (["16:9", "9:16"] as const).map((aspect) => (
+                  <button
+                    key={aspect}
+                    type="button"
+                    className={`${styles.formatButton} ${chosen === aspect ? styles.formatButtonActive : ""}`}
+                    aria-pressed={chosen === aspect}
+                    onClick={() => setFormat(aspect)}
+                  >
+                    {aspect === "16:9" ? "Landscape (16:9)" : "Vertical (9:16)"}
+                  </button>
+                ))
+              ) : (
+                <button
+                  type="button"
+                  className={styles.formatButton}
+                  onClick={() => makeOtherFormat(missingAspect!)}
+                  disabled={formatBusy}
+                >
+                  {formatBusy
+                    ? "Starting..."
+                    : missingAspect === "9:16"
+                      ? "Make the vertical (9:16) version"
+                      : "Make the landscape (16:9) version"}
+                </button>
+              )}
+              {formatError && <p className={styles.error} role="alert">{formatError}</p>}
+            </div>
+          )}
           <div className={styles.actions}>
-            {video && (
-              <a className={styles.primary} href={`${video}?download=1`} download>
-                Download video
+            {view.videos.landscape && (
+              <a className={styles.primary} href={`${view.videos.landscape}?download=1`} download>
+                {hasBoth ? "Download landscape" : "Download video"}
+              </a>
+            )}
+            {view.videos.vertical && (
+              <a className={hasBoth ? styles.secondary : styles.primary} href={`${view.videos.vertical}?download=1`} download>
+                {hasBoth ? "Download vertical" : "Download video"}
               </a>
             )}
             <button type="button" className={styles.secondary} onClick={share}>
@@ -833,6 +1017,7 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
             stepFile={view.stepFile}
             sceneStarts={view.sceneStarts}
             onSelect={(step) => seekToStep(step.id, step.index)}
+            onRerender={(edits) => rerender({ edits })}
           />
           <section className={styles.panel} aria-labelledby="cost-title">
             <h2 id="cost-title" className={styles.panelTitle}>
@@ -893,6 +1078,15 @@ export default function JobStatus({ initial, publicBaseUrl }: { initial: JobView
       {offline && (
         <p className={styles.fieldHint} role="status">
           We lost the connection for a moment. Still trying; your video keeps going in the meantime.
+        </p>
+      )}
+      {(view.videos.landscape || view.videos.vertical) && (
+        <p className={styles.fieldNote}>
+          The previous video is still here:{" "}
+          <a className={styles.inlineLink} href={view.videos.landscape ?? view.videos.vertical ?? "#"} target="_blank" rel="noreferrer">
+            open it
+          </a>
+          .
         </p>
       )}
       <p className={styles.fieldNote}>You can leave this page. Come back to the same link to see your video.</p>

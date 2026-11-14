@@ -834,3 +834,83 @@
   font-weight: 600;
   line-height: 1.4;
 }
+
+.panelHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.inlineLink {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.formatSwitch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.formatButton {
+  min-height: 40px;
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 15px;
+  color: var(--foreground);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.formatButton:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.formatButtonActive {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.stepEditCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.stepHiddenCard .stepEditCard {
+  opacity: 0.6;
+}
+
+.stepEditHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.stepEditLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.stepTextarea {
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 15px;
+  color: var(--foreground);
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  resize: vertical;
+}

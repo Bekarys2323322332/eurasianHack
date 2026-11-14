@@ -12,6 +12,7 @@ import { FPS, settingsFor } from "../../renderer/settings";
 import { buildTimeline } from "../../renderer/timeline";
 import { summarizeCost, type CostSummary } from "./costView";
 import { forecastBasis, type ForecastBasis } from "./forecast";
+import { readRerenderMarker } from "./rerender";
 import { queuePosition, resumePendingJobs } from "./pipeline";
 
 export interface JobView {
@@ -95,8 +96,10 @@ export function getJobView(jobId: string): JobView | null {
   if (!job) return null;
 
   const dir = getJobDir(jobId);
+  // During a re-render the previous video stays reachable until the new one replaces it.
+  const videosReady = job.status === "done" || readRerenderMarker(dir) !== null;
   const fileIfExists = (name: string) =>
-    job.status === "done" && fs.existsSync(path.join(dir, name)) ? jobFileUrl(jobId, name) : null;
+    videosReady && fs.existsSync(path.join(dir, name)) ? jobFileUrl(jobId, name) : null;
 
   const stepFile = readStepFile(jobId);
   const firstShown = stepFile?.steps.find((step) => step.status === "ok" && !step.hidden);
