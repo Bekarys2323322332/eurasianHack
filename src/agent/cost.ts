@@ -3,6 +3,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { costUsd, modelForTier, type ModelResult, type ModelTier } from "../llm";
 
 /** One model call's aggregate usage, including its per-call price estimate. */
 export interface AgentCostCall {
@@ -11,12 +12,47 @@ export interface AgentCostCall {
   inputTokens: number;
   outputTokens: number;
   costUsd: number | null;
+  tier?: ModelTier;
+  escalated?: boolean;
+  cacheHit?: boolean;
+  baselineCostUsd?: number | null;
 }
 
 /** Exact JSON structure written to each job's agent-cost.json file. */
 export interface AgentCostFile {
   calls: AgentCostCall[];
   totalUsd: number | null;
+}
+
+/** Add routing and full-strength comparison data to one model call. */
+export function modelCostCall(
+  result: Pick<
+    ModelResult<unknown>,
+    "model" | "tier" | "inputTokens" | "outputTokens" | "costUsd"
+  >,
+  requestedTier: ModelTier,
+): Omit<AgentCostCall, "stage"> {
+  let baselineCostUsd: number | null;
+  try {
+    baselineCostUsd = costUsd(
+      modelForTier("strong"),
+      result.inputTokens,
+      result.outputTokens,
+    );
+  } catch {
+    baselineCostUsd = null;
+  }
+
+  return {
+    model: result.model,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+    costUsd: result.costUsd,
+    tier: result.tier,
+    escalated: requestedTier === "small" && result.tier === "strong",
+    cacheHit: false,
+    baselineCostUsd,
+  };
 }
 
 /** Create an empty cost log before the planner or browser agent makes a call. */

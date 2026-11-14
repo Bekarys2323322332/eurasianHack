@@ -6,15 +6,21 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { callModel } from "../llm";
+import { callModel, costUsd, modelForTier } from "../llm";
 import { validateStepFile, type StepFile } from "../shared/stepFile";
 import type { Style } from "../renderer/settings";
-import type { AgentCostCall } from "./cost";
+import { modelCostCall, type AgentCostCall } from "./cost";
 
 interface ScriptLine {
   stepId: string;
   narration: string;
   caption: string;
+}
+
+interface ScriptCache {
+  lines: ScriptLine[];
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 const STYLE_TONES: Record<Style, string> = {
@@ -96,12 +102,45 @@ function scriptCachePath(
 }
 
 /** Read and validate a cached script, treating malformed entries as cache misses. */
-function readCachedLines(cachePath: string, schema: ReturnType<typeof scriptSchema>): ScriptLine[] | null {
+function readCachedScript(
+  cachePath: string,
+  schema: ReturnType<typeof scriptSchema>,
+): ScriptCache | null {
   if (!fs.existsSync(cachePath)) return null;
 
   try {
-    const parsed = schema.safeParse(JSON.parse(fs.readFileSync(cachePath, "utf8")));
-    return parsed.success ? parsed.data.lines : null;
+    const raw = JSON.parse(fs.readFileSync(cachePath, "utf8")) as {
+      inputTokens?: unknown;
+      outputTokens?: unknown;
+    };
+    const parsed = schema.safeParse(raw);
+    if (!parsed.success) return null;
+    return {
+      lines: parsed.data.lines,
+      inputTokens: validTokenCount(raw.inputTokens),
+      outputTokens: validTokenCount(raw.outputTokens),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Accept only non-negative token counts from cache files. */
+function validTokenCount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+/** Estimate the original script's full-strength cost, or zero for old cache entries. */
+function scriptCacheBaselineCost(cache: ScriptCache): number | null {
+  if (cache.inputTokens === undefined || cache.outputTokens === undefined) return 0;
+  try {
+    return costUsd(
+      modelForTier("strong"),
+      cache.inputTokens,
+      cache.outputTokens,
+    );
   } catch {
     return null;
   }
@@ -146,14 +185,18 @@ export async function writeScript(
   const stepIds = visibleSteps.map((step) => step.id);
   const schema = scriptSchema(stepIds, options.style);
   const cachePath = scriptCachePath(stepFile, visibleSteps, options);
-  const cachedLines = readCachedLines(cachePath, schema);
-  if (cachedLines) {
-    applyScriptLines(stepFile, stepsPath, cachedLines);
+  const cachedScript = readCachedScript(cachePath, schema);
+  if (cachedScript) {
+    applyScriptLines(stepFile, stepsPath, cachedScript.lines);
     return {
       model: "cache",
+      tier: "strong",
       inputTokens: 0,
       outputTokens: 0,
       costUsd: 0,
+      cacheHit: true,
+      escalated: false,
+      baselineCostUsd: scriptCacheBaselineCost(cachedScript),
       cached: true,
     };
   }
@@ -203,14 +246,23 @@ export async function writeScript(
 
   fs.mkdirSync(path.dirname(cachePath), { recursive: true });
   const partialCachePath = `${cachePath}.part`;
-  fs.writeFileSync(partialCachePath, `${JSON.stringify({ lines: validatedLines }, null, 2)}\n`, "utf8");
+  fs.writeFileSync(
+    partialCachePath,
+    `${JSON.stringify(
+      {
+        lines: validatedLines,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
   fs.renameSync(partialCachePath, cachePath);
 
   return {
-    model: result.model,
-    inputTokens: result.inputTokens,
-    outputTokens: result.outputTokens,
-    costUsd: result.costUsd,
+    ...modelCostCall(result, "strong"),
     cached: false,
   };
 }
